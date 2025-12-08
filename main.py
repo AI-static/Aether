@@ -1,0 +1,16 @@
+# -*- coding: utf-8 -*-
+from app import create_app
+from config.settings import settings
+
+# 创建应用
+app = create_app()
+
+if __name__ == '__main__':
+    # 启动 Sanic 应用
+    app.run(
+        host="0.0.0.0", 
+        port=settings.app_port, 
+        debug=settings.app_debug, 
+        auto_reload=settings.app_auto_reload
+    )
+
