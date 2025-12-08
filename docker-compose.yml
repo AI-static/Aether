@@ -12,7 +12,6 @@ services:
     environment:
       - APP_DEBUG=false  # 生产环境关闭调试
       - APP_AUTO_RELOAD=false
-      - SANIC_DISABLE_OPENAPI=true  # 禁用OpenAPI避免兼容性问题
       # 其他环境变量从.env文件读取
     depends_on:
       - redis

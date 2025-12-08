@@ -31,9 +31,7 @@ COPY pyproject.toml poetry.lock* ./
 # 导出 requirements.txt
 RUN poetry export \
     --format requirements.txt \
-    --output requirements.txt \
-    --without-hashes \
-    --verbose
+    --output requirements.txt
 
 # 验证导出结果
 RUN echo "=== 导出验证 ===" && \
