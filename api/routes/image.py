@@ -1,6 +1,7 @@
 """图片生成路由"""
 from sanic import Blueprint, Request
 from sanic.response import json, HTTPResponse
+from sanic_ext import openapi
 from services.image_service import ImageService
 from utils.logger import logger
 from api.schema.image import (

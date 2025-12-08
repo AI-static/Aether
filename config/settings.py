@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     
     # 应用配置
     app_name: str = "Aether"
+    app_description: str = "业务适配层服务"  # 应用描述
     app_port: int = 8000
     app_debug: bool = False
     app_auto_reload: bool = False
@@ -26,7 +27,7 @@ class Settings(BaseSettings):
     
     # 图片配置
     image_dir: str = "generated_images"  # 图片存储目录
-    
+
     # 日志配置
     log_level: str = "INFO"  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_to_file: bool = True  # 是否写入文件

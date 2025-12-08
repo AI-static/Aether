@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
@@ -10,11 +11,11 @@ authors = [
     {name = "yancyyu", email = "yancyyu.ok@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.12,<4.0"
 dependencies = [
     "asyncpg>=0.30.0",
     "gunicorn>=23.0.0",
-    "orjson>=3.10.18",
+    "orjson>=3.11.5",
     "python-dotenv>=1.1.1",
     "python-multipart>=0.0.20",
     "pydantic>=2.0.0",
@@ -22,24 +23,14 @@ dependencies = [
     "pydantic-core>=2.27.0",
     "sanic>=25.3.0",
     "sanic-cors>=2.2.0",
-    "sanic-ext>=24.12.0",
+    "sanic-ext>=24.12.0,<25.0.0",
     "uvicorn>=0.34.2",
     "httpx[http2]>=0.27.0",
     "loguru>=0.7.0",
-    "redis>=5.0.0",
-    "tortoise-orm[asyncpg]>=0.21.0"
+    "redis>=7.1.0",
+    "tortoise-orm[asyncpg]>=0.25.1"
 ]
-
-[tool.poetry]
-name = "aether"
-version = "0.1.0"
-description = "业务适配层服务"
-authors = ["yancyyu <yancyyu.ok@gmail.com>"]
-readme = "README.md"
-packages = [{include = "app"}]
-
-[tool.poetry.dependencies]
-python = "^3.11"
+packages = [{include = "**/*.py"}]  # 包含所有Python文件
 
 [tool.ruff]
 target-version = "py311"

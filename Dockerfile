@@ -1,7 +1,7 @@
 # 推荐方案：Poetry 导出 + pip 安装
 
 # 第一阶段：使用 Poetry 导出完整的 requirements.txt
-FROM swr.cn-east-3.myhuaweicloud.com/ai-prd/python:3.13-slim AS req-generator
+FROM python:3.12-slim AS req-generator
 
 # 设置 Debian 镜像源
 RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources || \
@@ -28,9 +28,8 @@ RUN poetry config virtualenvs.create false
 WORKDIR /app
 COPY pyproject.toml poetry.lock* ./
 
-# 导出包含所有依赖组的 requirements.txt
+# 导出 requirements.txt
 RUN poetry export \
-    --with ai-sdk,common-sdk \
     --format requirements.txt \
     --output requirements.txt \
     --without-hashes \
@@ -43,7 +42,7 @@ RUN echo "=== 导出验证 ===" && \
     grep -E "(sanic|pydantic|httpx)" requirements.txt | head -5 || echo "某些关键依赖可能缺失"
 
 # 第二阶段：使用 pip 安装依赖（更轻量的运行时镜像）
-FROM swr.cn-east-3.myhuaweicloud.com/ai-prd/python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 # 设置 Debian 镜像源
 RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources || \
@@ -89,4 +88,13 @@ RUN adduser -u 5678 --disabled-password --gecos "" appuser && \
 USER appuser
 
 # 启动命令
-CMD ["gunicorn", "-c", "config.py", "main:app"]
+CMD ["gunicorn", "-c", "config/gunicorn.py", "main:app"]
+
+# 构建镜像
+# docker build -t aether:latest .
+
+# 运行容器
+# docker run -d -p 8000:8000 --name aether aether:latest
+
+# [debug] 运行容器（挂载代码目录 + 开启debug模式）
+# docker run -d -p 8000:8000 -v E:\code\Aether:/app -e APP_DEBUG=true -e APP_AUTO_RELOAD=true --name aether-debug aether:latest

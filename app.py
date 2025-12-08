@@ -27,14 +27,14 @@ def create_app() -> Sanic:
     
     # 扩展
     Extend(app)
-    
+
     # CORS
     CORS(
         app,
         resources={r"/*": {"origins": "*"}},
         supports_credentials=True,
     )
-    
+
     # WebSocket
     app.enable_websocket()
     

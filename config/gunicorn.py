@@ -3,7 +3,7 @@
 # 多进程
 import multiprocessing
 import os  # 引入 os 模块，用于读取环境变量
-from .settings import settings
+from config.settings import settings
 
 """gunicorn+gevent 的配置文件"""
 
