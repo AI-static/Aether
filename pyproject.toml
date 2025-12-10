@@ -26,9 +26,9 @@ sanic-ext = "^24.12.0"
 uvicorn = "^0.34.2"
 httpx = {extras = ["http2"], version = "^0.27.0"}
 loguru = "^0.7.0"
-redis = "^7.1.0"
 tortoise-orm = {extras = ["asyncpg"], version = "^0.25.1"}
 cryptography = "^41.0.0"
+openai = "^2.9.0"
 
 [tool.ruff]
 target-version = "py311"

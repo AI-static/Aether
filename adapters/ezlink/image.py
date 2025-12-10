@@ -1,43 +1,50 @@
-"""Ezlink适配器"""
+"""Ezlink适配器 - OpenAI兼容包装器"""
 import httpx
 from typing import Dict, Any, Optional, List
 from config.settings import settings
 from utils.logger import logger
 import base64
+from datetime import datetime
+from dataclasses import dataclass
+
+
+# 定义OpenAI兼容的数据结构
+@dataclass
+class ImageData:
+    b64_json: Optional[str] = None
+    url: Optional[str] = None
+
+@dataclass
+class ImageUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass
+class ImageResponse:
+    created: int
+    data: List[ImageData]
+    usage: ImageUsage
 
 
 class ImageAdapter:
-    """Ezlink服务适配器"""
+    """Ezlink服务适配器 - OpenAI兼容"""
     
     def __init__(self):
-        self.base_url = "https://api.ezlinkai.com/v1"
+        self.base_url = "https://api.ezlinkai.com/v1"  # Ezlink的固定base URL
         self.api_key = settings.ezlink_api_key
-        self.timeout = 60  # 图片生成需要更长时间
+        self.timeout = 300  # 图片生成需要更长时间
         
     async def generate_image(self, prompt: str, model: str = "gemini-2.5-flash-image-preview", 
-                            n: int = 1, size: str = "1024x1024") -> Optional[Dict]:
+                            n: int = 1, size: str = "1024x1024", 
+                            response_format: str = "b64_json") -> Optional[ImageResponse]:
         """
-        创建图片
-        返回格式：
-        {
-            "created": 时间戳,
-            "data": [{"b64_json": "base64编码的图片"}],
-            "usage": {
-                "total_tokens": 总token数,
-                "input_tokens": 输入token数,
-                "output_tokens": 输出token数,
-                "input_tokens_details": {
-                    "text_tokens": 文本token数,
-                    "image_tokens": 图片token数
-                }
-            }
-        }
+        创建图片 - 返回OpenAI兼容格式
         """
         if not self.api_key:
             logger.error("Ezlink API Key未配置")
             return None
-            
-        # 图片生成不使用缓存，确保每次都生成新图片
             
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -54,27 +61,62 @@ class ImageAdapter:
                         "Content-Type": "application/json"
                     }
                 )
+                
                 if response.status_code == 200:
-                    result = response.json()
-                    # 记录成功信息和关键数据
-                    image_count = len(result.get('data', []))
-                    usage = result.get('usage', {})
+                    ezlink_result = response.json()
                     
+                    # 记录成功信息
                     logger.info(
                         f"[Ezlink] 生成图片成功 | "
                         f"状态码: {response.status_code} | "
-                        f"生成数量: {image_count} | "
-                        f"尺寸: {size} | "
-                        f"提示词: {prompt[:30]}... | "
-                        f"Token使用: {usage}"
+                        f"模型: {model} | "
+                        f"数量: {len(ezlink_result.get('data', []))}"
+                        f"用量: {ezlink_result.get('usage', {})}"
                     )
                     
-                    # 记录第一个生成的图片信息（如果有）
-                    if result.get('data') and len(result['data']) > 0 and 'b64_json' in result['data'][0]:
-                        b64_preview = result['data'][0]['b64_json'][:20] + '...'
-                        logger.debug(f"[Ezlink] 图片预览 (base64): {b64_preview}")
+                    # 转换为OpenAI格式
+                    image_data_list = []
+                    for item in ezlink_result.get('data', []):
+                        if response_format == "url":
+                            # 如果是b64_json，需要先保存并返回URL
+                            b64_data = item.get("b64_json")
+                            if b64_data:
+                                # 保存图片并生成URL
+                                import os
+                                import hashlib
+                                from config.settings import settings
+                                
+                                os.makedirs(settings.image_dir, exist_ok=True)
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                content_hash = hashlib.md5(b64_data.encode()).hexdigest()[:8]
+                                filename = f"{model}_{timestamp}_{content_hash}.png"
+                                filepath = os.path.join(settings.image_dir, filename)
+                                
+                                # 解码并保存
+                                image_bytes = base64.b64decode(b64_data)
+                                with open(filepath, 'wb') as f:
+                                    f.write(image_bytes)
+                                
+                                # 生成访问URL
+                                image_url = f"/images/{filename}"
+                                image_data_list.append(ImageData(url=image_url))
+                        else:
+                            # 返回b64_json
+                            image_data_list.append(ImageData(b64_json=item.get("b64_json")))
                     
-                    return result
+                    # 处理usage信息 - 兼容Ezlink格式
+                    usage = ezlink_result.get("usage", {})
+                    image_usage = ImageUsage(
+                        input_tokens=usage.get("input_tokens", 0),
+                        output_tokens=usage.get("output_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0)
+                    )
+                    
+                    return ImageResponse(
+                        created=ezlink_result.get("created", int(datetime.now().timestamp())),
+                        data=image_data_list,
+                        usage=image_usage
+                    )
                 else:
                     logger.error(
                         f"[Ezlink] 生成图片失败 | "
@@ -83,140 +125,16 @@ class ImageAdapter:
                     )
                     return None
                     
+        except httpx.TimeoutException as e:
+            logger.error(f"调用Ezlink API超时: {e}")
+            return None
+        except httpx.RequestError as e:
+            logger.error(f"调用Ezlink API请求错误: {e}")
+            return None
         except Exception as e:
             logger.error(f"调用Ezlink API失败: {e}")
             return None
-    
-    async def edit_image(self, prompt: str, files: list,
-                        model: str = "gemini-2.5-flash-image-preview", 
-                        n: int = 1, filename: str = None) -> Optional[Dict]:
-        """
-        编辑图片
-        :param prompt: 编辑描述
-        :param files: 图片文件（可能是单个文件或文件列表）
-        :param model: 模型名称
-        :param n: 生成图片数量
-        :param filename: 原始文件名（已弃用）
-        :return: 生成的图片数据
-        """
-        if not self.api_key:
-            logger.error("Ezlink API Key未配置")
-            return None
-            
-        try:
-            
-            # 构建multipart/form-data
-            data = {
-                'model': model,
-                'prompt': prompt,
-                'n': str(n)
-            }
-            
-            # 构建文件列表 - 使用 httpx 支持的格式
-            file_list = []
-            for file in files:
-                file_list.append(('image[]', (file.name, file.body, 'application/octet-stream')))
 
-            logger.info(
-                f"[Ezlink] 发起请求 | "
-                f"输入图片数: {len(files)} | "
-                f"提示词: {prompt[:30]}... | "
-            )
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/images/generations",
-                    data=data,
-                    files=file_list,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}"
-                    }
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    # 记录成功信息和关键数据
-                    image_count = len(result.get('data', []))
-                    usage = result.get('usage', {})
-                    
-                    logger.info(
-                        f"[Ezlink] 编辑图片成功 | "
-                        f"状态码: {response.status_code} | "
-                        f"输入图片数: {len(file_list)} | "
-                        f"生成数量: {image_count} | "
-                        f"提示词: {prompt[:30]}... | "
-                        f"Token使用: {usage}"
-                    )
-                    
-                    # 记录第一个生成的图片信息（如果有）
-                    if result.get('data') and len(result['data']) > 0 and 'b64_json' in result['data'][0]:
-                        b64_preview = result['data'][0]['b64_json'][:20] + '...'
-                        logger.debug(f"[Ezlink] 图片预览 (base64): {b64_preview}")
-                    
-                    return result
-                else:
-                    logger.error(
-                        f"[Ezlink] 编辑图片失败 | "
-                        f"状态码: {response.status_code} | "
-                        f"错误: {response.text[:200]}"
-                    )
-                    return None
-                    
-        except Exception as e:
-            logger.error(f"编辑图片失败: {e}")
-            return None
-    
-    async def save_generated_images(self, result: Dict, output_dir: str = "generated_images") -> List[str]:
-        """
-        保存生成的图片到文件
-        :param result: generate_image或edit_image的返回结果
-        :param output_dir: 输出目录
-        :return: 保存的文件路径列表
-        """
-        import os
-        from datetime import datetime
-        
-        if not result or 'data' not in result:
-            return []
-            
-        # 创建输出目录
-        os.makedirs(output_dir, exist_ok=True)
-        
-        saved_files = []
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        for i, item in enumerate(result['data']):
-            if 'b64_json' in item:
-                # 解码base64图片
-                image_data = base64.b64decode(item['b64_json'])
-                
-                # 生成文件名
-                filename = f"ezlink_{timestamp}_{i+1}.png"
-                filepath = os.path.join(output_dir, filename)
-                
-                # 保存文件
-                with open(filepath, 'wb') as f:
-                    f.write(image_data)
-                    
-                saved_files.append(filepath)
-                logger.info(f"保存图片: {filepath}")
-                
-        return saved_files
-    
-    async def get_image_from_url(self, image_url: str) -> Optional[bytes]:
-        """
-        从URL下载图片
-        :param image_url: 图片URL
-        :return: 图片二进制数据
-        """
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.get(image_url)
-                if response.status_code == 200:
-                    return response.content
-                else:
-                    logger.error(f"下载图片失败: {response.status_code}")
-                    return None
-        except Exception as e:
-            logger.error(f"下载图片失败: {e}")
-            return None
+# 创建全局实例
+ezlink_image_client = ImageAdapter()

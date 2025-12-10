@@ -11,12 +11,6 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_debug: bool = False
     app_auto_reload: bool = False
-    
-    # Redis配置
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_db: int = 0
-    redis_password: Optional[str] = None
 
     pg_host: str = "localhost"
     pg_port: int = 5432
@@ -26,10 +20,13 @@ class Settings(BaseSettings):
     
     # 其他服务配置
     ezlink_api_key: Optional[str] = None
-    ezlink_base_url: Optional[str] = None
+    vectorai_api_key: Optional[str] = None  # VectorAI API密钥
     
     # 图片配置
-    image_dir: str = "generated_images"  # 图片存储目录
+    image_dir: str = "data"  # 图片存储目录
+    
+    # 加密配置
+    encryption_master_key: Optional[str] = None  # 32字节十六进制字符串，用于API密钥加密
 
     # 日志配置
     log_level: str = "INFO"  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -50,11 +47,6 @@ settings = Settings()
 # 兼容旧代码的引用
 global_settings = settings
 
-# 导出常用配置
-REDIS_HOST = settings.redis_host
-REDIS_PORT = settings.redis_port
-REDIS_DB = settings.redis_db
-REDIS_PASSWORD = settings.redis_password
 
 
 def create_db_config() -> dict:
@@ -63,18 +55,18 @@ def create_db_config() -> dict:
             "default": {
                 "engine": "tortoise.backends.asyncpg",
                 "credentials": {
-                    "host": global_settings.postgres.host,
-                    "port": global_settings.postgres.port,
-                    "user": global_settings.postgres.user,
-                    "password": global_settings.postgres.password,
-                    "database": global_settings.postgres.database,
+                    "host": global_settings.pg_host,
+                    "port": global_settings.pg_port,
+                    "user": global_settings.pg_user,
+                    "password": global_settings.pg_password,
+                    "database": global_settings.pg_database,
                     "schema": "public",
-                    "maxsize": 100,
-                    "minsize": 500,
+                    "maxsize": 500,
+                    "minsize": 10,
                     "command_timeout": 30,  # 增加超时时间
                     "server_settings": {
                         # PostgreSQL服务器设置
-                        "application_name": global_settings.app.name,
+                        "application_name": global_settings.app_name,
                         "tcp_keepalives_idle": "300",
                         "tcp_keepalives_interval": "30",
                         "tcp_keepalives_count": "3",
@@ -87,11 +79,7 @@ def create_db_config() -> dict:
         "apps": {
             "models": {
                 "models": [
-                    "app.models.identity.policy",
-                    "app.models.identity.application",
-                    "app.models.document.file",
-                    "app.models.document.item",
-                    "app.models.kb.kb"
+                    "models.identity",
                 ],
                 "default_connection": "default"
             }

@@ -35,11 +35,15 @@ class AuthMiddleware:
             if not apikey:
                 raise ValueError("缺少认证令牌")
             
-            await identity_service.verify_auth(
-                apikey=apikey,
+            # 验证API密钥并获取用户信息
+            auth_info = await identity_service.validate_auth(
+                api_key=apikey,
             )
             
-            logger.info(f"身份验证成功: {request.ctx.auth_info.auth_type} - {request.method} {request.path}")
+            # 将认证信息存储到请求上下文中
+            request.ctx.auth_info = auth_info
+            
+            logger.info(f"身份验证成功: {auth_info.source}:{auth_info.source_id} - {request.method} {request.path}")
             return None
             
         except ValueError as e:
@@ -58,7 +62,6 @@ class AuthMiddleware:
         """检查是否应该跳过认证"""
         exempt_routes = [
             "/health",
-            "/identity/api-keys",
         ]
         
         for route in exempt_routes:

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 from contextvars import ContextVar
 from loguru import logger as loguru_logger
+import logging
 from config.settings import settings
 
 

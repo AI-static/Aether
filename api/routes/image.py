@@ -1,7 +1,6 @@
 """图片生成路由"""
 from sanic import Blueprint, Request
 from sanic.response import json, HTTPResponse
-from sanic_ext import openapi
 from services.image_service import ImageService
 from utils.logger import logger
 from api.schema.image import CreateImageRequest, EditImageRequest, BatchCreateRequest
@@ -43,12 +42,13 @@ async def generate_image(request: Request):
             message=ErrorMessage.VALIDATION_ERROR,
             data={"detail": str(e)}
         ).model_dump(), status=400)
-    except Exception as e:
-        logger.error(f"生成图片失败: {e}")
+    except (ValueError, IndexError) as e:
+        logger.error(f"参数错误: {e}")
         return json(BaseResponse(
-            code=ErrorCode.INTERNAL_ERROR,
-            message=ErrorMessage.INTERNAL_ERROR
-        ).model_dump(), status=500)
+            code=ErrorCode.VALIDATION_ERROR,
+            message=ErrorMessage.VALIDATION_ERROR,
+            data={"detail": f"{e}"}
+        ).model_dump(), status=400)
 
 
 @bp.post("/edit")
@@ -98,14 +98,8 @@ async def edit_image(request: Request):
         return json(BaseResponse(
             code=ErrorCode.VALIDATION_ERROR,
             message=ErrorMessage.VALIDATION_ERROR,
-            data={"detail": "参数格式错误"}
+            data={"detail": f"{e}"}
         ).model_dump(), status=400)
-    except Exception as e:
-        logger.error(f"编辑图片失败: {e}")
-        return json(BaseResponse(
-            code=ErrorCode.INTERNAL_ERROR,
-            message=ErrorMessage.INTERNAL_ERROR
-        ).model_dump(), status=500)
 
 
 @bp.post("/batch-generate")
@@ -144,38 +138,27 @@ async def batch_generate(request: Request):
             message=ErrorMessage.VALIDATION_ERROR,
             data={"detail": str(e)}
         ).model_dump(), status=400)
-    except Exception as e:
-        logger.error(f"批量生成图片失败: {e}")
+    except (ValueError, IndexError) as e:
+        logger.error(f"参数错误: {e}")
         return json(BaseResponse(
-            code=ErrorCode.INTERNAL_ERROR,
-            message=ErrorMessage.INTERNAL_ERROR
-        ).model_dump(), status=500)
+            code=ErrorCode.VALIDATION_ERROR,
+            message=ErrorMessage.VALIDATION_ERROR,
+            data={"detail": f"{e}"}
+        ).model_dump(), status=400)
 
 
 @bp.get("/models")
 async def list_models(request: Request):
     """获取支持的模型列表"""
-    models = [
-        {
-            "id": "gemini-2.5-flash-image-preview",
-            "name": "Gemini 2.5 Flash Image Preview",
-            "description": "Nano Banana 1.0 图片生成模型 (¥0.1/张)",
-        },
-        {
-            "id": "gemini-3-pro-image-preview",
-            "name": "Gemini 3 Pro Image Preview",
-            "description": "Nano Banana 2.0 图片生成模型 (¥0.2/张)",
-            "max_n": 10
-        }
-    ]
-    
+    models = await image_service.get_models()
+
     return json(BaseResponse(
         code=ErrorCode.SUCCESS,
         message=ErrorMessage.SUCCESS,
         data={
             "models": models
         }
-    ).dict())
+    ).model_dump())
 
 
 @bp.post("/upload")
@@ -187,7 +170,7 @@ async def upload_image(request: Request):
             return json(BaseResponse(
                 code=ErrorCode.BAD_REQUEST,
                 message=ErrorMessage.PLEASE_SELECT_IMAGE
-            ).dict(), status=400)
+            ).model_dump(), status=400)
         
         # 获取上传的文件
         files = request.files.get('image')
@@ -195,7 +178,7 @@ async def upload_image(request: Request):
             return json(BaseResponse(
                 code=ErrorCode.BAD_REQUEST,
                 message=ErrorMessage.PLEASE_SELECT_IMAGE
-            ).dict(), status=400)
+            ).model_dump(), status=400)
         
         # Sanic的files可能是列表或单个文件
         if isinstance(files, list):
@@ -214,13 +197,13 @@ async def upload_image(request: Request):
                 code=ErrorCode.SUCCESS,
                 message=ErrorMessage.IMAGE_UPLOAD_SUCCESS,
                 data=result
-            ).dict())
+            ).model_dump())
         else:
             return json(BaseResponse(
                 code=ErrorCode.INTERNAL_ERROR,
                 message=result.get("error", ErrorMessage.IMAGE_UPLOAD_FAILED),
                 data=None
-            ).dict(), status=500)
+            ).model_dump(), status=500)
             
     except ValidationError as e:
         logger.error(f"参数验证失败: {e}")
@@ -228,13 +211,14 @@ async def upload_image(request: Request):
             code=ErrorCode.VALIDATION_ERROR,
             message=ErrorMessage.VALIDATION_ERROR,
             data={"detail": str(e)}
-        ).dict(), status=400)
-    except Exception as e:
-        logger.error(f"上传图片失败: {e}")
+        ).model_dump(), status=400)
+    except (ValueError, IndexError) as e:
+        logger.error(f"参数错误: {e}")
         return json(BaseResponse(
-            code=ErrorCode.INTERNAL_ERROR,
-            message=ErrorMessage.INTERNAL_ERROR
-        ).dict(), status=500)
+            code=ErrorCode.VALIDATION_ERROR,
+            message=ErrorMessage.VALIDATION_ERROR,
+            data={"detail": f"{e}"}
+        ).model_dump(), status=400)
 
 
 @bp.post("/upload-url")
@@ -248,7 +232,7 @@ async def upload_from_url(request: Request):
             return json(BaseResponse(
                 code=ErrorCode.BAD_REQUEST,
                 message=ErrorMessage.PROVIDE_IMAGE_URL
-            ).dict(), status=400)
+            ).model_dump(), status=400)
         
         # 调用服务上传
         result = await image_service.upload_from_url(image_url)
@@ -258,13 +242,13 @@ async def upload_from_url(request: Request):
                 code=ErrorCode.SUCCESS,
                 message=ErrorMessage.IMAGE_UPLOAD_SUCCESS,
                 data=result
-            ).dict())
+            ).model_dump())
         else:
             return json(BaseResponse(
                 code=ErrorCode.INTERNAL_ERROR,
                 message=result.get("error", ErrorMessage.IMAGE_UPLOAD_FAILED),
                 data=None
-            ).dict(), status=500)
+            ).model_dump(), status=500)
             
     except ValidationError as e:
         logger.error(f"参数验证失败: {e}")
@@ -272,57 +256,11 @@ async def upload_from_url(request: Request):
             code=ErrorCode.VALIDATION_ERROR,
             message=ErrorMessage.VALIDATION_ERROR,
             data={"detail": str(e)}
-        ).dict(), status=400)
-    except Exception as e:
-        logger.error(f"从URL上传图片失败: {e}")
+        ).model_dump(), status=400)
+    except (ValueError, IndexError) as e:
+        logger.error(f"参数错误: {e}")
         return json(BaseResponse(
-            code=ErrorCode.INTERNAL_ERROR,
-            message=ErrorMessage.INTERNAL_ERROR
-        ).dict(), status=500)
-
-
-@bp.get("/usage")
-async def get_usage_info(request: Request):
-    """获取使用说明"""
-    usage_info = {
-        "generate": {
-            "endpoint": "/api/v1/image/generate",
-            "method": "POST",
-            "description": "生成图片",
-            "parameters": {
-                "prompt": "图片描述（必填）",
-                "model": "模型名称（可选）",
-                "n": "生成图片数量（可选，默认1）",
-                "size": "图片尺寸（可选，默认1024x1024）"
-            },
-            "example": {
-                "prompt": "一只可爱的猫在花园里玩耍",
-                "n": 2,
-                "size": "1024x1024"
-            }
-        },
-        "edit": {
-            "endpoint": "/api/v1/image/edit",
-            "method": "POST",
-            "content-type": "multipart/form-data",
-            "description": "编辑图片",
-            "parameters": {
-                "image": "图片文件（必填）",
-                "prompt": "编辑描述（必填）",
-                "model": "模型名称（可选，默认gemini-2.5-flash-image-preview）",
-                "n": "生成图片数量（可选，默认1）"
-            },
-            "example_form": {
-                "image": "file",
-                "prompt": "给这只猫戴上一顶帽子",
-                "model": "gemini-2.5-flash-image-preview",
-                "n": 1
-            }
-        }
-    }
-    
-    return json(BaseResponse(
-        code=ErrorCode.SUCCESS,
-        message=ErrorMessage.SUCCESS,
-        data=usage_info
-    ).dict())
+            code=ErrorCode.VALIDATION_ERROR,
+            message=ErrorMessage.VALIDATION_ERROR,
+            data={"detail": f"{e}"}
+        ).model_dump(), status=400)

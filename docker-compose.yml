@@ -14,17 +14,9 @@ services:
       - APP_AUTO_RELOAD=false
       # 其他环境变量从.env文件读取
     depends_on:
-      - redis
       - postgres
     command: ["gunicorn", "-c", "config/gunicorn.py", "main:app"]  # 使用gunicorn
     working_dir: /app
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
 
   postgres:
     image: postgres:15-alpine
@@ -38,5 +30,4 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
 volumes:
-  redis_data:
   postgres_data:

@@ -1,9 +1,10 @@
 """图片生成服务"""
 from typing import List, Dict, Any
-from adapters.ezlink.image import ImageAdapter
+from adapters import ezlink_image_client, vectorai_client
 from utils.logger import logger
 from utils.exceptions import BusinessException
 from api.schema.response import ErrorCode
+from models.images import get_model_info, ProviderEnum
 from config.settings import settings
 import base64
 import os
@@ -15,7 +16,6 @@ class ImageService:
     """图片生成业务服务"""
     
     def __init__(self):
-        self.ezlink = ImageAdapter()
         # 图片存储目录
         self.image_dir = settings.image_dir
         # 图片URL路径（固定路径）
@@ -31,30 +31,64 @@ class ImageService:
         :param size: 图片尺寸
         :return: 包含图片链接和使用情况的结果
         """
-        logger.info(f"开始创建图片: {prompt[:100]}")
-        
-        # 调用Ezlink API
-        result = await self.ezlink.generate_image(prompt, model, n, size)
-        
-        if not result:
-            raise BusinessException("Ezlink API 返回空结果", ErrorCode.IMAGE_GENERATE_FAILED)
+        # 获取模型信息
+        model_info = get_model_info(model)
+
+        if not model_info:
+            raise ValueError(f"不支持的模型: {model}")
+
+        if size not in model_info.supported_sizes:
+            raise ValueError(f"不支持的尺寸: {size} 已经支持的为 {model_info.supported_sizes}")
+
+        logger.info(f"开始创建图片: {prompt[:100]} model_info {model_info}")
+
+        # 根据提供商调用不同的API - 统一使用OpenAI格式
+        if model_info.provider == ProviderEnum.VECTORAI:
+            # 调用VectorAI (OpenAI兼容) API，使用url格式
+            response = await vectorai_client.images.generate(
+                prompt=prompt,
+                model=model,
+                n=n,
+                size=size,
+                extra_body = {
+                    "watermark": True,
+                },
+            )
+        else:
+            # 调用Ezlink API (也返回OpenAI格式)，使用url格式
+            response = await ezlink_image_client.generate_image(
+                prompt, 
+                model, 
+                n, 
+                size,
+                response_format="url"
+            )
+        logger.info(f"生成图片service返回 {response}")
+        if not response:
+            provider_name = model_info.provider.value
+            raise BusinessException(f"{provider_name} API 返回空结果", ErrorCode.IMAGE_GENERATE_FAILED)
         
         # 保存图片并生成URL
-        images = await self._save_images_with_urls(result)
-        
+        images = await self._save_images_with_urls(response, model=model)
+
         # 构造返回结果
-        response = {
+        result = {
             "success": True,
-            "created": result.get("created"),
+            "created": response.created,
             "images": images,
-            "usage": result.get("usage", {}),
+            "usage": {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.total_tokens
+            },
             "prompt": prompt,
             "model": model,
-            "size": size
+            "size": size,
+            "provider": model_info.provider.value
         }
         
-        logger.info(f"图片生成成功，数量: {len(images)}")
-        return response
+        logger.info(f"图片生成成功，数量: {len(images)}，提供商: {model_info.provider.value}")
+        return result
     
     async def edit_image(self, prompt: str, files,
                         model: str = "gemini-2.5-flash-image-preview", 
@@ -71,13 +105,13 @@ class ImageService:
         logger.info(f"files type: {type(files)}")
         
         # 调用Ezlink编辑API，一次性传入所有图片
-        result = await self.ezlink.edit_image(prompt, files, model, n)
+        result = await ezlink_image_client.edit_image(prompt, files, model, n)
         
         if not result:
             raise BusinessException("Ezlink API 返回空结果", ErrorCode.IMAGE_EDIT_FAILED)
         
         # 保存图片并生成URL
-        images = await self._save_images_with_urls(result, prefix="edited")
+        images = await self._save_images_with_urls(result, prefix="edited", model=model)
         
         # 构造返回结果
         response = {
@@ -92,46 +126,33 @@ class ImageService:
         logger.info(f"图片编辑成功，数量: {len(images)}")
         return response
 
-    async def _save_images_with_urls(self, result: Dict, prefix: str = "generated") -> List[Dict[str, Any]]:
+    async def _save_images_with_urls(self, response, prefix: str = "generated", model: str = "unknown") -> List[Dict[str, Any]]:
         """
         保存图片并返回访问URL
-        :param result: API返回结果
+        :param response: API返回结果（OpenAI格式对象）
         :param prefix: 文件名前缀
         :return: 包含URL的图片信息列表
         """
-        if not result or 'data' not in result:
+        if not response or not response.data:
             return []
             
         # 创建输出目录
         os.makedirs(self.image_dir, exist_ok=True)
         
         images = []
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        for i, item in enumerate(result.get("data", [])):
-            if "b64_json" in item:
-                # 生成唯一的文件名
-                content_hash = hashlib.md5(item["b64_json"].encode()).hexdigest()[:8]
-                filename = f"{prefix}_{timestamp}_{content_hash}_{i+1}.png"
-                filepath = os.path.join(self.image_dir, filename)
-                
-                # 解码并保存图片
-                image_data = base64.b64decode(item["b64_json"])
-                with open(filepath, 'wb') as f:
-                    f.write(image_data)
-                
-                # 构造访问URL（相对路径）
-                image_url = f"{self.image_url_path}/{filename}"
-                
+
+        for i, item in enumerate(response.data):
+            # 处理URL格式
+            if item.url:
+                # 直接使用返回的URL（无论是本地还是远程）
                 image_info = {
                     "index": i + 1,
-                    "filename": filename,
-                    "url": image_url,
-                    "path": filepath
+                    "filename": f"{item.url.split('/')[-1]}" if item.url else f"{prefix}_{i+1}",
+                    "url": item.url,
+                    "path": item.url if item.url.startswith('/images/') else None  # 本地文件才需要path
                 }
                 images.append(image_info)
-                
-                logger.info(f"保存图片: {filename}")
+                logger.info(f"图片URL: {item.url}")
         
         return images
     
@@ -206,7 +227,7 @@ class ImageService:
         logger.info(f"从URL上传图片: {image_url}")
         
         # 下载图片
-        image_data = await self.ezlink.get_image_from_url(image_url)
+        image_data = await ezlink_image_client.get_image_from_url(image_url)
         if not image_data:
             raise BusinessException("无法下载图片", ErrorCode.IMAGE_UPLOAD_FAILED)
         
@@ -216,3 +237,10 @@ class ImageService:
             filename += '.png'
         
         return await self.upload_image(image_data, filename)
+    
+    async def get_models(self) -> List[Dict[str, Any]]:
+        """获取所有支持的图片模型"""
+        from models.images import get_all_models
+        
+        models = get_all_models()
+        return [model.model_dump() for model in models]

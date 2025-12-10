@@ -55,4 +55,4 @@ poetry.lock
 pyproject.toml.bak
 
 # Large directories
-generated_images/
+data/
