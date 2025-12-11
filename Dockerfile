@@ -95,4 +95,4 @@ CMD ["gunicorn", "-c", "config/gunicorn.py", "main:app"]
 # docker run -d -p 8000:8000 --name aether aether:latest
 
 # [debug] 运行容器（挂载代码目录 + 开启debug模式）
-# docker run -d -p 8000:8000 -v E:\code\Aether:/app -e APP_DEBUG=true -e APP_AUTO_RELOAD=true --name aether-debug aether:latest
+# docker run -d -p 8001:8000 -v .:/app -e APP_DEBUG=true -e APP_AUTO_RELOAD=true --name aether-debug aether:latest

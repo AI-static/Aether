@@ -26,7 +26,9 @@ async def generate_image(request: Request):
             prompt=data.prompt,
             model=data.model,
             n=data.n,
-            size=data.size
+            size=data.size,
+            aspect_ratio=data.aspect_ratio,
+            resolution=data.resolution
         )
         
         return json(BaseResponse(
@@ -70,14 +72,34 @@ async def edit_image(request: Request):
             prompt=request.form.get('prompt'),
             model=request.form.get('model'),
             n=int(request.form.get('n', 1)),
-            size=request.form.get('size')
+            size=request.form.get('size'),
+            aspect_ratio=request.form.get('aspect_ratio'),
+            resolution=request.form.get('resolution')
         )
+
+        # 验证模型支持的参数
+        from models.images import get_model_info
+        model_info = get_model_info(data.model)
+        if not model_info:
+            raise ValueError(f"不支持的模型: {data.model}")
+        
+        # 验证并应用默认值
+        aspect_ratio = data.aspect_ratio or '1:1'
+        if model_info.supported_aspect_ratio and aspect_ratio not in model_info.supported_aspect_ratio:
+            raise ValueError(f"不支持的长宽比: {aspect_ratio} 已支持的为 {model_info.supported_aspect_ratio}")
+        
+        resolution = data.resolution or "1K"
+        if model_info.supported_resolution and resolution not in model_info.supported_resolution:
+            raise ValueError(f"不支持的分辨率: {resolution} 已支持的为 {model_info.supported_resolution}")
 
         result = await image_service.edit_image(
             prompt=data.prompt,
             files=files,  # 直接传递files对象
             model=data.model,
-            n=data.n
+            n=data.n,
+            size=data.size,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution
         )
         
         return json(BaseResponse(
@@ -86,51 +108,6 @@ async def edit_image(request: Request):
             data=result
         ).model_dump())
             
-    except ValidationError as e:
-        logger.error(f"参数验证失败: {e}")
-        return json(BaseResponse(
-            code=ErrorCode.VALIDATION_ERROR,
-            message=ErrorMessage.VALIDATION_ERROR,
-            data={"detail": str(e)}
-        ).model_dump(), status=400)
-    except (ValueError, IndexError) as e:
-        logger.error(f"参数错误: {e}")
-        return json(BaseResponse(
-            code=ErrorCode.VALIDATION_ERROR,
-            message=ErrorMessage.VALIDATION_ERROR,
-            data={"detail": f"{e}"}
-        ).model_dump(), status=400)
-
-
-@bp.post("/batch-generate")
-async def batch_generate(request: Request):
-    """批量生成图片"""
-    try:
-        data = BatchCreateRequest(**request.json)
-        logger.info(f"收到批量图片生成请求，数量: {len(data.prompts)}")
-        
-        results = await image_service.batch_create_images(
-            prompts=data.prompts,
-            model=data.model,
-            n=data.n,
-            size=data.size
-        )
-        
-        # 统计成功/失败数量
-        success_count = sum(1 for r in results if r["success"])
-        failed_count = len(results) - success_count
-        
-        return json(BaseResponse(
-            code=ErrorCode.SUCCESS,
-            message=ErrorMessage.BATCH_PROCESS_COMPLETE,
-            data={
-                "total": len(results),
-                "success": success_count,
-                "failed": failed_count,
-                "results": results
-            }
-        ).model_dump())
-        
     except ValidationError as e:
         logger.error(f"参数验证失败: {e}")
         return json(BaseResponse(

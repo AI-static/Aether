@@ -34,13 +34,6 @@ def create_app() -> Sanic:
 
     # WebSocket
     app.enable_websocket()
-    
-    # 静态文件服务（图床功能）
-    app.static(
-        "/images",
-        settings.image_dir,
-        name="images"
-    )
 
     # 中间件
     from middleware.request_context import RequestContextMiddleware

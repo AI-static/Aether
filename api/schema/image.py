@@ -8,7 +8,9 @@ class CreateImageRequest(BaseModel):
     prompt: str = Field(..., description="图片描述", min_length=1, max_length=1000)
     model: str = Field("gemini-2.5-flash-image-preview", description="模型名称")
     n: int = Field(1, ge=1, le=10, description="生成图片数量")
-    size: str = Field("1024x1024", description="图片尺寸")
+    size: Optional[str] = Field(default=None, description="图片尺寸")
+    aspect_ratio: Optional[str] = Field(default=None, description="图片长宽比")
+    resolution: Optional[str] = Field(default=None, description="图片分辨率")
 
 
 class EditImageRequest(BaseModel):
@@ -16,7 +18,9 @@ class EditImageRequest(BaseModel):
     prompt: str = Field(..., description="编辑描述", min_length=1, max_length=1000)
     model: str = Field("gemini-2.5-flash-image-preview", description="模型名称")
     n: Optional[int] = Field(1, ge=1, le=10, description="生成图片数量")
-    size: Optional[str] = Field(default="1024x1024", description="图片尺寸")
+    size: Optional[str] = Field(default=None, description="图片尺寸")
+    aspect_ratio: Optional[str] = Field(default=None, description="图片长宽比")
+    resolution: Optional[str] = Field(default=None, description="图片分辨率")
 
 
 class BatchCreateRequest(BaseModel):

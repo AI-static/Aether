@@ -11,7 +11,7 @@ class VectorAIAdapter(AsyncOpenAI):
         # 初始化OpenAI客户端，但使用VectorAI的配置
         super().__init__(
             api_key=settings.vectorai_api_key or "",
-            base_url="https://api.vectortara.com/v1",
+            base_url=settings.vectorai_base_url,
             timeout=300.0
         )
 

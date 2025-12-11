@@ -1,13 +1,12 @@
 """图片生成服务"""
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from adapters import ezlink_image_client, vectorai_client
 from utils.logger import logger
 from utils.exceptions import BusinessException
 from api.schema.response import ErrorCode
 from models.images import get_model_info, ProviderEnum
 from config.settings import settings
-import base64
-import os
+from utils.oss import oss_client
 from datetime import datetime
 import hashlib
 
@@ -16,19 +15,24 @@ class ImageService:
     """图片生成业务服务"""
     
     def __init__(self):
-        # 图片存储目录
-        self.image_dir = settings.image_dir
-        # 图片URL路径（固定路径）
-        self.image_url_path = "/images"
-    
-    async def create_image(self, prompt: str, model: str = "gemini-2.5-flash-image-preview", 
-                          n: int = 1, size: str = "1024x1024") -> Dict[str, Any]:
+        # OSS文件夹路径
+        self.oss_folder = "Aether"
+
+    async def create_image(self,
+                           prompt: str,
+                           model: str = "gemini-2.5-flash-image-preview",
+                           n: int = 1,
+                           size: str = "1024x1024",
+                           aspect_ratio: str = '1:1',
+                           resolution: str="1K") -> Dict[str, Any]:
         """
         创建图片
         :param prompt: 图片描述
         :param model: 模型名称
         :param n: 生成图片数量
         :param size: 图片尺寸
+        :param aspect_ratio: 长宽比
+        :param resolution: 分辨率
         :return: 包含图片链接和使用情况的结果
         """
         # 获取模型信息
@@ -37,8 +41,14 @@ class ImageService:
         if not model_info:
             raise ValueError(f"不支持的模型: {model}")
 
-        if size not in model_info.supported_sizes:
+        if size and size not in model_info.supported_sizes:
             raise ValueError(f"不支持的尺寸: {size} 已经支持的为 {model_info.supported_sizes}")
+
+        if aspect_ratio and model_info.supported_aspect_ratio and aspect_ratio not in model_info.supported_aspect_ratio:
+            raise ValueError(f"不支持的长宽比: {aspect_ratio} 已经支持的为 {model_info.supported_aspect_ratio}")
+
+        if resolution and model_info.supported_resolution and resolution not in model_info.supported_resolution:
+            raise ValueError(f"不支持的长宽比: {resolution} 已经支持的为 {model_info.supported_resolution}")
 
         logger.info(f"开始创建图片: {prompt[:100]} model_info {model_info}")
 
@@ -58,9 +68,10 @@ class ImageService:
             # 调用Ezlink API (也返回OpenAI格式)，使用url格式
             response = await ezlink_image_client.generate_image(
                 prompt, 
-                model, 
-                n, 
+                model,
                 size,
+                aspect_ratio,
+                resolution,
                 response_format="url"
             )
         logger.info(f"生成图片service返回 {response}")
@@ -92,20 +103,26 @@ class ImageService:
     
     async def edit_image(self, prompt: str, files,
                         model: str = "gemini-2.5-flash-image-preview", 
-                        n: int = 1) -> Dict[str, Any]:
+                        n: int = 1,
+                        size: Optional[str] = None,
+                        aspect_ratio: Optional[str] = None,
+                        resolution: Optional[str] = None) -> Dict[str, Any]:
         """
         编辑图片
         :param prompt: 编辑描述
         :param files: 图片文件（可能是单个文件或文件列表）
         :param model: 模型名称
         :param n: 生成图片数量
+        :param size: 图片尺寸
+        :param aspect_ratio: 长宽比
+        :param resolution: 分辨率
         :return: 编辑后的图片信息
         """
         logger.info(f"开始编辑图片: {prompt[:100]}")
         logger.info(f"files type: {type(files)}")
         
         # 调用Ezlink编辑API，一次性传入所有图片
-        result = await ezlink_image_client.edit_image(prompt, files, model, n)
+        result = await ezlink_image_client.edit_image(prompt, files, model, n, size, aspect_ratio, resolution)
         
         if not result:
             raise BusinessException("Ezlink API 返回空结果", ErrorCode.IMAGE_EDIT_FAILED)
@@ -120,7 +137,10 @@ class ImageService:
             "images": images,
             "usage": result.get("usage", {}),
             "prompt": prompt,
-            "model": model
+            "model": model,
+            "size": size,
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution
         }
         
         logger.info(f"图片编辑成功，数量: {len(images)}")
@@ -136,23 +156,24 @@ class ImageService:
         if not response or not response.data:
             return []
             
-        # 创建输出目录
-        os.makedirs(self.image_dir, exist_ok=True)
-        
         images = []
 
         for i, item in enumerate(response.data):
-            # 处理URL格式
+            # 直接使用adapter返回的URL（可能是外部URL或已上传到OSS的URL）
             if item.url:
-                # 直接使用返回的URL（无论是本地还是远程）
                 image_info = {
                     "index": i + 1,
                     "filename": f"{item.url.split('/')[-1]}" if item.url else f"{prefix}_{i+1}",
                     "url": item.url,
-                    "path": item.url if item.url.startswith('/images/') else None  # 本地文件才需要path
+                    "path": None  # 不再需要path，因为文件都在OSS上
                 }
                 images.append(image_info)
                 logger.info(f"图片URL: {item.url}")
+            
+            # 处理base64格式（直接返回，让上层处理）
+            elif hasattr(item, 'b64_json') and item.b64_json:
+                # 这里不应该出现，因为adapter已经处理了
+                logger.warning("收到了未处理的base64数据，这不应该发生")
         
         return images
     
@@ -175,12 +196,12 @@ class ImageService:
     
     async def upload_image(self, image_data: bytes, filename: str = None) -> Dict[str, Any]:
         """
-        上传图片（图床功能）
+        上传图片到OSS（图床功能）
         :param image_data: 图片二进制数据
         :param filename: 文件名（可选）
         :return: 上传结果
         """
-        logger.info(f"开始上传图片: {filename or '未命名'}")
+        logger.info(f"开始上传图片到OSS: {filename or '未命名'}")
         
         # 生成文件名
         if not filename:
@@ -192,51 +213,29 @@ class ImageService:
         if not filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
             filename += '.png'
         
-        # 保存图片
-        filepath = os.path.join(self.image_dir, filename)
-        os.makedirs(self.image_dir, exist_ok=True)
-        
         try:
-            with open(filepath, 'wb') as f:
-                f.write(image_data)
-            
-            # 生成访问URL
-            image_url = f"{self.image_url_path}/{filename}"
+            # 上传到OSS
+            object_name = f"{self.oss_folder}/{filename}"
+            oss_url = await oss_client.upload_and_get_url(
+                object_name, 
+                image_data,
+            )
             
             response = {
                 "success": True,
                 "filename": filename,
-                "url": image_url,
-                "path": filepath,
+                "url": oss_url,
+                "path": object_name,
                 "size": len(image_data)
             }
             
-            logger.info(f"图片上传成功: {filename}")
+            logger.info(f"图片上传到OSS成功: {filename}")
             return response
             
         except Exception as e:
-            logger.error(f"图片上传失败: {e}")
+            logger.error(f"图片上传到OSS失败: {e}")
             raise BusinessException(f"上传失败: {str(e)}", ErrorCode.IMAGE_UPLOAD_FAILED)
     
-    async def upload_from_url(self, image_url: str) -> Dict[str, Any]:
-        """
-        从URL上传图片到图床
-        :param image_url: 图片URL
-        :return: 上传结果
-        """
-        logger.info(f"从URL上传图片: {image_url}")
-        
-        # 下载图片
-        image_data = await ezlink_image_client.get_image_from_url(image_url)
-        if not image_data:
-            raise BusinessException("无法下载图片", ErrorCode.IMAGE_UPLOAD_FAILED)
-        
-        # 从URL提取文件名
-        filename = image_url.split('/')[-1]
-        if '.' not in filename:
-            filename += '.png'
-        
-        return await self.upload_image(image_data, filename)
     
     async def get_models(self) -> List[Dict[str, Any]]:
         """获取所有支持的图片模型"""

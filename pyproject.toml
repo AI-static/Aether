@@ -11,8 +11,10 @@ readme = "README.md"
 packages = [{include = "**/*.py"}]  # 包含所有Python文件
 
 [tool.poetry.dependencies]
+alibabacloud-oss-v2 = "^1.2.1"
+aiohttp = "^3.13.2"
+cryptography = "^41.0.7"
 python = "^3.12"
-asyncpg = "^0.30.0"
 gunicorn = "^23.0.0"
 orjson = "^3.11.5"
 python-dotenv = "^1.1.1"
@@ -23,12 +25,10 @@ pydantic-core = "^2.27.0"
 sanic = "^25.3.0"
 sanic-cors = "^2.2.0"
 sanic-ext = "^24.12.0"
-uvicorn = "^0.34.2"
-httpx = {extras = ["http2"], version = "^0.27.0"}
 loguru = "^0.7.0"
 tortoise-orm = {extras = ["asyncpg"], version = "^0.25.1"}
-cryptography = "^41.0.0"
 openai = "^2.9.0"
+agno = "^2.3.10"
 
 [tool.ruff]
 target-version = "py311"

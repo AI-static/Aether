@@ -18,7 +18,7 @@ bind = f"0.0.0.0:{settings.app_port}"
 
 # 进程数 = cpu数量（对于 I/O 密集型应用，可以将 workers 数量设置为 2 * CPU 核心数，以更好地利用 CPU 资源）
 workers = 4
-timeout = 60
+timeout = 600  # 增加到10分钟，以支持图片生成等长时间任务
 
 # 线程数 = cpu数量
 threads = 1
