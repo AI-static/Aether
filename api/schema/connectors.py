@@ -1,92 +1,56 @@
-"""
-简化的连接器配置类
-
-只保留核心必要的配置，移除过度设计
-"""
-
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-
-__all__ = [
-    "BaseConfig",
-    "MonitorConfig",
-    "ExtractConfig",
-    "HarvestConfig",
-    "PublishConfig",
-    "ConfigFactory"
-]
+# -*- coding: utf-8 -*-
+"""连接器API路由"""
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from typing import List, Optional, Dict, Any, Union
+from models.connectors import PlatformType, LoginMethod
 
 
-@dataclass
-class BaseConfig:
-    """基础配置"""
-    session_id: Optional[str] = None
-    timeout: int = 30
+# ==================== 请求模型 ====================
+
+class ExtractRequest(BaseModel):
+    """提取请求"""
+    urls: List[str] = Field(..., description="要提取的URL列表")
+    platform: Optional[PlatformType] = Field(None, description="平台名称（xiaohongshu/wechat/generic），不指定则自动检测")
+    concurrency: int = Field(10, description="并发数量，默认10（并行）", ge=1, le=10)
 
 
-@dataclass
-class MonitorConfig(BaseConfig):
-    """监控配置"""
-    urls: List[str]
-    check_interval: int = 3600  # 1小时
-    webhook_url: Optional[str] = None
+class HarvestRequest(BaseModel):
+    """采收请求"""
+    platform: PlatformType = Field(..., description="平台名称（xiaohongshu/wechat）")
+    user_id: str = Field(..., description="用户ID或账号标识")
+    limit: Optional[int] = Field(None, description="限制数量")
 
 
-@dataclass
-class ExtractConfig(BaseConfig):
-    """提取配置"""
-    urls: List[str]
-    schema: Optional[Dict[str, Any]] = None
-    instruction: Optional[str] = None
+class PublishRequest(BaseModel):
+    """发布请求"""
+    platform: PlatformType = Field(..., description="平台名称（xiaohongshu）")
+    content: str = Field(..., description="内容文本")
+    content_type: str = Field("text", description="内容类型（text/image/video）")
+    images: Optional[List[str]] = Field(None, description="图片URL列表")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
+    session_id: Optional[str] = Field(None, description="可选的会话ID，用于复用已登录会话")
 
 
-@dataclass
-class HarvestConfig(BaseConfig):
-    """采收配置"""
-    user_id: str = ""
-    limit: Optional[int] = None
-    content_types: List[str] = field(default_factory=lambda: ["posts"])
+class LoginRequest(BaseModel):
+    """登录请求"""
+    platform: PlatformType = Field(..., description="平台名称（xiaohongshu）")
+    method: Optional[LoginMethod] = Field(LoginMethod.COOKIE, description="登录方法（目前仅支持 cookie）")
+    cookies: Optional[Union[Dict[str, str], str]] = Field(None, description="Cookie 数据（字典或字符串格式）")
 
-
-@dataclass
-class PublishConfig(BaseConfig):
-    """发布配置"""
-    content: str = ""
-    content_type: str = "text"  # text/image/video
-    images: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
-
-
-# 配置工厂
-class ConfigFactory:
-    """配置工厂，简化配置创建"""
-
-    @staticmethod
-    def monitor(urls: List[str], webhook_url: Optional[str] = None) -> MonitorConfig:
-        """创建监控配置"""
-        return MonitorConfig(urls=urls, webhook_url=webhook_url)
-
-    @staticmethod
-    def extract(urls: List[str], schema: Optional[Dict[str, Any]] = None) -> ExtractConfig:
-        """创建提取配置"""
-        return ExtractConfig(urls=urls, schema=schema)
-
-    @staticmethod
-    def harvest(user_id: str, limit: Optional[int] = None) -> HarvestConfig:
-        """创建采收配置"""
-        return HarvestConfig(user_id=user_id, limit=limit)
-
-    @staticmethod
-    def publish(
-        content: str,
-        content_type: str = "text",
-        images: Optional[List[str]] = None,
-        tags: Optional[List[str]] = None
-    ) -> PublishConfig:
-        """创建发布配置"""
-        return PublishConfig(
-            content=content,
-            content_type=content_type,
-            images=images or [],
-            tags=tags or []
-        )
+    @field_validator('cookies', mode='before')
+    @classmethod
+    def parse_cookies(cls, v):
+        """解析 cookies，支持字符串和字典格式"""
+        if v is None:
+            return None
+        
+        if isinstance(v, str):
+            # 解析 cookie 字符串为字典
+            cookies = {}
+            for item in v.split(';'):
+                if '=' in item:
+                    key, value = item.strip().split('=', 1)
+                    cookies[key] = value
+            return cookies
+        
+        return v

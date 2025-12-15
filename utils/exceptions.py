@@ -1,6 +1,6 @@
 """自定义异常类"""
 from typing import Optional
-from api.schema.response import ErrorCode
+from api.schema.base import ErrorCode
 
 
 class BusinessException(Exception):

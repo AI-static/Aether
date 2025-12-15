@@ -96,7 +96,7 @@ class LoggingManager:
 logging_manager = LoggingManager()
 
 # 导出logger实例（支持请求ID）
-logger = logging_manager.get_logger("api")
+logger = logging_manager.get_logger("app")
 
 # 提供便捷函数
 def set_request_id(request_id: str):

@@ -6,10 +6,12 @@ from enum import Enum
 from agentbay.browser.browser_agent import ActOptions
 from typing import Dict, Any, List, Optional
 from typing import Optional, List
+from playwright.async_api import Page
 
 from .base import BaseConnector
 from utils.logger import logger
 from pydantic import BaseModel, Field
+from models.connectors import PlatformType
 
 
 class ExtractType(str, Enum):
@@ -47,24 +49,14 @@ class WechatConnector(BaseConnector):
     """微信公众号连接器"""
 
     def __init__(self):
-        super().__init__(platform_name="wechat")
+        super().__init__(platform_name=PlatformType.WECHAT)
 
-    async def extract_content(
-        self,
-        urls: List[str]
-    ) -> List[Dict[str, Any]]:
-        """提取微信公众号文章内容"""
-        results = []
-        async for result in self.extract_content_stream(urls):
-            results.append(result)
-        return results
-
-    async def extract_content_stream(
+    async def extract_summary(
         self,
         urls: List[str],
         concurrency: int = 1
     ):
-        """流式提取微信公众号文章内容，支持并发"""
+        """流式提取微信公众号文章摘要，支持并发"""
         # 定义提取指令
         instruction = "提取公众号文章：标题、作者、发布时间、阅读量、点赞数、在看数、内容摘要"
 
@@ -106,7 +98,7 @@ class WechatConnector(BaseConnector):
                             "data": data.model_dump() if ok else {}
                         }
 
-                        logger.info(f"[wechat] Extracted URL {idx}/{len(urls)}, success={ok}")
+                        logger.info(f"[wechat] Extracted summary for URL {idx}/{len(urls)}, success={ok}")
 
                         return result
 
@@ -138,46 +130,6 @@ class WechatConnector(BaseConnector):
             await browser.close()
             await p.stop()
 
-    async def monitor_changes(self, urls: List[str], check_interval: int = 3600):
-        """监控文章数据变化（主要是阅读量、点赞数等）"""
-        last_snapshots = {}
-
-        while True:
-            current_results = await self.extract_content(urls)
-
-            for result in current_results:
-                if not result.get("success"):
-                    continue
-
-                url = result["url"]
-                current_data = result["data"]
-                previous_data = last_snapshots.get(url)
-
-                if previous_data:
-                    # 检查关键指标变化
-                    changes = {}
-                    for key in ["read_count", "like_count", "comment_count", "share_count"]:
-                        old_val = previous_data.get(key)
-                        new_val = current_data.get(key)
-                        if old_val is not None and new_val is not None and old_val != new_val:
-                            changes[key] = {
-                                "old": old_val,
-                                "new": new_val,
-                                "diff": new_val - old_val if isinstance(new_val, (int, float)) else None
-                            }
-
-                    if changes:
-                        yield {
-                            "url": url,
-                            "type": "stats_changed",
-                            "changes": changes,
-                            "timestamp": asyncio.get_event_loop().time()
-                        }
-
-                last_snapshots[url] = current_data
-
-            await asyncio.sleep(check_interval)
-
     async def harvest_user_content(
         self,
         user_id: str,
@@ -207,6 +159,261 @@ class WechatConnector(BaseConnector):
 
             return []
 
+        finally:
+            await browser.close()
+            await p.stop()
+    
+    def _get_note_detail_config(self) -> Dict[str, Any]:
+        """获取微信文章详情快速提取的配置"""
+        return {
+            "title_selectors": [
+                "#activity-name",
+                ".rich_media_title",
+                "h1",
+                "[id*='title']",
+                ".rich_media_meta_list"
+            ],
+            "author_selectors": [
+                "#profileBt",
+                ".rich_media_meta_text",
+                "[id*='author']",
+                ".rich_media_meta_nickname"
+            ],
+            "time_selectors": [
+                "#publish_time",
+                ".rich_media_meta_text",
+                "[id*='time']",
+                ".publish-time",
+                "time",
+                ".rich_media_meta_list .rich_media_meta_text"
+            ],
+            "content_selectors": [
+                "#js_content",
+                ".rich_media_content",
+                "[id*='content']",
+                ".content"
+            ],
+            "image_selectors": [
+                "img"
+            ],
+            "stats_selectors": [
+                "#sg_read_num3",
+                ".read_num",
+                "[id*='read']",
+                ".rich_media_meta_text"
+            ]
+        }
+    
+    async def get_note_detail(
+        self,
+        urls: List[str],
+        concurrency: int = 3
+    ) -> List[Dict[str, Any]]:
+        """快速获取微信文章详情
+        
+        Args:
+            urls: 文章URL列表
+            concurrency: 并发数
+            
+        Returns:
+            提取结果列表
+        """
+        p, browser, context = await self._get_browser_context()
+        
+        try:
+            semaphore = asyncio.Semaphore(concurrency)
+            
+            async def extract_detail(url):
+                async with semaphore:
+                    page = None
+                    try:
+                        page = await context.new_page()
+                        await page.goto(url, timeout=30000)
+                        await page.wait_for_load_state("networkidle", timeout=10000)
+                        
+                        config = self._get_note_detail_config()
+                        content = await self._extract_content_parallel(page, url, config)
+                        
+                        return {
+                            "url": url,
+                            "success": content.get("success", False),
+                            "data": content if content.get("success") else None,
+                            "error": content.get("error") if not content.get("success") else None,
+                            "method": "detail_extraction"
+                        }
+                    except Exception as e:
+                        return {
+                            "url": url,
+                            "success": False,
+                            "error": str(e),
+                            "method": "detail_extraction"
+                        }
+                    finally:
+                        if page:
+                            await page.close()
+            
+            tasks = [extract_detail(url) for url in urls]
+            results = await asyncio.gather(*tasks)
+            
+        finally:
+            await browser.close()
+            await p.stop()
+        
+        return results
+    
+    async def extract_by_creator_id(
+        self,
+        creator_id: str,
+        limit: Optional[int] = None,
+        extract_details: bool = False
+    ) -> List[Dict[str, Any]]:
+        """通过公众号ID提取文章
+        
+        Args:
+            creator_id: 公众号的 __biz 参数
+            limit: 限制数量
+            extract_details: 是否提取详情
+            
+        Returns:
+            文章列表
+        """
+        logger.info(f"[wechat] Extracting articles from creator: {creator_id}, limit={limit}")
+        
+        gzh_url = f"https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz={creator_id}"
+        
+        p, browser, context = await self._get_browser_context()
+        
+        try:
+            page = await context.new_page()
+            await page.goto(gzh_url, timeout=60000)
+            await asyncio.sleep(3)
+            
+            instruction = "提取公众号的所有文章列表，包括：标题、链接、发布时间、阅读量、简介"
+            ok, data = await self._extract_page_content(page, instruction)
+            
+            if ok and data:
+                articles = data if isinstance(data, list) else [data]
+                articles = articles[:limit] if limit else articles
+                
+                if extract_details:
+                    # 提取每篇文章的详情
+                    urls = [article.get("url", "") for article in articles if article.get("url")]
+                    details = await self.get_note_detail(urls, concurrency=2)
+                    
+                    # 合并信息
+                    results = []
+                    for article, detail in zip(articles, details):
+                        if detail.get("success"):
+                            results.append({
+                                "success": True,
+                                "data": {
+                                    **article,
+                                    "detail": detail.get("data")
+                                }
+                            })
+                        else:
+                            results.append({
+                                "success": False,
+                                "error": detail.get("error"),
+                                "article_info": article
+                            })
+                    
+                    return results
+                else:
+                    return [{
+                        "success": True,
+                        "data": article
+                    } for article in articles]
+            
+            return []
+            
+        finally:
+            await browser.close()
+            await p.stop()
+    
+    async def get_note_detail_single(
+        self,
+        url: str
+    ) -> Dict[str, Any]:
+        """获取单篇文章详情
+        
+        Args:
+            url: 文章URL
+            
+        Returns:
+            文章详情
+        """
+        results = await self.get_note_detail([url])
+        return results[0] if results else {"success": False, "error": "No result"}
+    
+    async def search_and_extract(
+        self,
+        keyword: str,
+        limit: int = 20,
+        extract_details: bool = False
+    ) -> List[Dict[str, Any]]:
+        """搜索并提取微信文章
+        
+        Args:
+            keyword: 搜索关键词
+            limit: 限制数量
+            extract_details: 是否提取详情
+            
+        Returns:
+            搜索结果
+        """
+        logger.info(f"[wechat] Searching for: {keyword}")
+        
+        # 微信文章搜索接口（这里需要根据实际搜索页面实现）
+        search_url = f"https://weixin.sogou.com/weixin?type=2&query={keyword}"
+        
+        p, browser, context = await self._get_browser_context()
+        
+        try:
+            page = await context.new_page()
+            await page.goto(search_url, timeout=60000)
+            await asyncio.sleep(3)
+            
+            # 提取搜索结果
+            instruction = "提取搜索结果中的文章列表，包括：标题、作者、链接、时间、摘要"
+            ok, data = await self._extract_page_content(page, instruction)
+            
+            if ok and data:
+                articles = data if isinstance(data, list) else [data]
+                articles = articles[:limit] if limit else articles
+                
+                if extract_details:
+                    # 提取每篇文章的详情
+                    urls = [article.get("url", "") for article in articles if article.get("url")]
+                    details = await self.get_note_detail(urls, concurrency=2)
+                    
+                    # 合并信息
+                    results = []
+                    for article, detail in zip(articles, details):
+                        if detail.get("success"):
+                            results.append({
+                                "success": True,
+                                "data": {
+                                    **article,
+                                    "detail": detail.get("data")
+                                }
+                            })
+                        else:
+                            results.append({
+                                "success": False,
+                                "error": detail.get("error"),
+                                "article_info": article
+                            })
+                    
+                    return results
+                else:
+                    return [{
+                        "success": True,
+                        "data": article
+                    } for article in articles]
+            
+            return []
+            
         finally:
             await browser.close()
             await p.stop()

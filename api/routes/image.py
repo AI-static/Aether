@@ -4,7 +4,7 @@ from sanic.response import json, HTTPResponse
 from services.image_service import ImageService
 from utils.logger import logger
 from api.schema.image import CreateImageRequest, EditImageRequest, BatchCreateRequest
-from api.schema.response import BaseResponse, ErrorCode, ErrorMessage
+from api.schema.base import BaseResponse, ErrorCode, ErrorMessage
 
 from pydantic import ValidationError
 

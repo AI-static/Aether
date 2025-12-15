@@ -21,7 +21,7 @@ class ExceptionHandlerMiddleware:
         async def not_found_handler(request: Request, exc: NotFound) -> HTTPResponse:
             """404处理"""
             from sanic.response import json
-            from api.schema.response import BaseResponse, ErrorCode, ErrorMessage
+            from api.schema.base import BaseResponse, ErrorCode, ErrorMessage
             return json(
                 BaseResponse(
                     code=ErrorCode.NOT_FOUND,
@@ -34,7 +34,7 @@ class ExceptionHandlerMiddleware:
         async def global_exception_handler(request: Request, exc: Exception):
             """全局异常处理"""
             from sanic.response import json
-            from api.schema.response import BaseResponse, ErrorCode, ErrorMessage
+            from api.schema.base import BaseResponse, ErrorCode, ErrorMessage
             from utils.exceptions import BusinessException
             
             # 业务异常处理

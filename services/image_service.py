@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from adapters import ezlink_client, vectorai_client
 from utils.logger import logger
 from utils.exceptions import BusinessException
-from api.schema.response import ErrorCode
+from api.schema.base import ErrorCode
 from models.images import get_model_info, ProviderEnum
 from config.settings import settings
 from utils.oss import oss_client

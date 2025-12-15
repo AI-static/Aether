@@ -18,10 +18,6 @@ results = await connector_service.extract_urls([
     "https://mp.weixin.qq.com/s/xxx"
 ])
 
-# 监控变化
-async for change in connector_service.monitor_urls(urls):
-    print(f"检测到变化: {change}")
-
 # 采收用户内容
 notes = await connector_service.harvest_user_content(
     platform="xiaohongshu",
@@ -42,7 +38,7 @@ from .base import BaseConnector
 from .xiaohongshu import XiaohongshuConnector
 from .wechat import WechatConnector
 from .generic import GenericConnector
-from .scene_service import ConnectorService, connector_service
+from .connector_service import ConnectorService, connector_service
 
 __all__ = [
     # 基类

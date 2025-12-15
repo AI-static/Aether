@@ -6,7 +6,7 @@ from tortoise.exceptions import IntegrityError, DoesNotExist
 from models.identity import ApiKey
 from utils.logger import logger
 from utils.exceptions import BusinessException
-from api.schema.response import ErrorCode
+from api.schema.base import ErrorCode
 from api.schema.identity import ApiKeyCreate, ApiKeyInfo, SourceType
 from utils.encryption import encrypt_api_key, decrypt_api_key, verify_api_key, generate_api_key
 

@@ -3,7 +3,7 @@ from sanic import Blueprint, Request
 from sanic.response import json
 from services.identity_service import identity_service, SourceType
 from utils.logger import logger
-from api.schema.response import BaseResponse, ErrorCode, ErrorMessage
+from api.schema.base import BaseResponse, ErrorCode, ErrorMessage
 from api.schema.identity import ApiKeyCreate, ApiKeyUpdate
 from utils.exceptions import BusinessException
 

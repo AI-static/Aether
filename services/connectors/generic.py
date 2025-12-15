@@ -6,13 +6,14 @@ from typing import Dict, Any, List, Optional
 
 from .base import BaseConnector
 from utils.logger import logger
+from models.connectors import PlatformType
 
 
 class GenericConnector(BaseConnector):
     """通用网站连接器 - 适用于任何网站"""
 
     def __init__(self):
-        super().__init__(platform_name="generic")
+        super().__init__(platform_name=PlatformType.GENERIC)
 
     async def extract_content(
         self,
