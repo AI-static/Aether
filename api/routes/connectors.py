@@ -19,103 +19,17 @@ connectors_bp = Blueprint("connectors", url_prefix="/connectors")
 
 @connectors_bp.post("/extract-summary")
 async def extract_summary(request: Request):
-    """提取URL内容摘要 - SSE 流式输出
-
-    使用Agent提取，每提取完一个URL就立即返回结果，不需要等待所有URL都提取完成
-    """
-
-    async def event_stream(response):
-        client_id = f"client_{id(response)}"
-        logger.info(f"[SSE Extract] 客户端连接: {client_id}")
-
-        try:
-            data = ExtractRequest(**request.json)
-            logger.info(f"[SSE Extract] 收到内容提取请求: {len(data.urls)} 个URL, platform={data.platform}")
-
-            # 发送确认消息
-            ack_msg = {
-                "type": "start",
-                "message": "提取已启动",
-                "config": {
-                    "urls": data.urls,
-                    "platform": data.platform,
-                    "url_count": len(data.urls),
-                    "concurrency": data.concurrency
-                }
-            }
-            await response.write(f"data: {json_lib.dumps(ack_msg, ensure_ascii=False)}\n\n")
-
-            success_count = 0
-            total_count = 0
-
-            # 逐个 yield 提取结果
-            async for result in connector_service.extract_summary(
-                urls=data.urls,
-                platform=data.platform,
-                concurrency=data.concurrency
-            ):
-                total_count += 1
-                if result.get("success"):
-                    success_count += 1
-
-                logger.info(f"[SSE Extract] {client_id} Received result {total_count}/{len(data.urls)} for {result.get('url')}")
-
-                # 推送单个URL的提取结果
-                result_msg = {
-                    "type": "result",
-                    "data": result,
-                    "progress": {
-                        "current": total_count,
-                        "total": len(data.urls),
-                        "success_count": success_count
-                    }
-                }
-
-                try:
-                    await response.write(f"data: {json_lib.dumps(result_msg, ensure_ascii=False)}\n\n")
-                    logger.info(f"[SSE Extract] {client_id} Sent result {total_count}/{len(data.urls)}")
-                except Exception as send_error:
-                    logger.error(f"[SSE Extract] {client_id} 发送失败: {send_error}")
-                    break
-
-            # 发送完成消息
-            complete_msg = {
-                "type": "complete",
-                "message": f'提取完成：{success_count}/{total_count} 成功',
-                "summary": {
-                    "total": total_count,
-                    "success_count": success_count,
-                    "failed_count": total_count - success_count
-                }
-            }
-            await response.write(f"data: {json_lib.dumps(complete_msg, ensure_ascii=False)}\n\n")
-
-        except ValidationError as e:
-            logger.error(f"[SSE Extract] {client_id} 参数验证失败: {e}")
-            error_msg = {"type": "error", "message": "参数验证失败", "detail": str(e)}
-            try:
-                await response.write(f"data: {json_lib.dumps(error_msg, ensure_ascii=False)}\n\n")
-            except:
-                pass
-        except Exception as e:
-            logger.error(f"[SSE Extract] {client_id} 提取异常: {e}", exc_info=True)
-            error_msg = {"type": "error", "message": str(e)}
-            try:
-                await response.write(f"data: {json_lib.dumps(error_msg, ensure_ascii=False)}\n\n")
-            except:
-                pass
-        finally:
-            logger.info(f"[SSE Extract] 客户端断开: {client_id}")
+    """提取URL内容摘要 - SSE 流式输出"""
 
     return ResponseStream(
-        event_stream,
-        headers={
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
+            connector_service.extract_summary_stream,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
 
 
 @connectors_bp.post("/harvest")

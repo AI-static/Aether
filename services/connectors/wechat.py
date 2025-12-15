@@ -53,6 +53,16 @@ class WechatConnector(BaseConnector):
 
     async def extract_summary(
         self,
+        urls: List[str]
+    ) -> List[Dict[str, Any]]:
+        """提取微信公众号文章摘要"""
+        results = []
+        async for result in self.extract_summary_stream(urls):
+            results.append(result)
+        return results
+
+    async def extract_summary_stream(
+        self,
         urls: List[str],
         concurrency: int = 1
     ):
