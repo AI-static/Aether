@@ -13,7 +13,7 @@ packages = [{include = "**/*.py"}]  # 包含所有Python文件
 [tool.poetry.dependencies]
 alibabacloud-oss-v2 = "^1.2.1"
 aiohttp = "^3.13.2"
-cryptography = "^41.0.7"
+cryptography = ">=44.0.0"
 python = "^3.12"
 gunicorn = "^23.0.0"
 orjson = "^3.11.5"
@@ -29,6 +29,8 @@ loguru = "^0.7.0"
 tortoise-orm = {extras = ["asyncpg"], version = "^0.25.1"}
 openai = "^2.9.0"
 agno = "^2.3.10"
+uvicorn = "^0.38.0"
+wuying-agentbay-sdk = "^0.12.0"
 
 [tool.ruff]
 target-version = "py311"

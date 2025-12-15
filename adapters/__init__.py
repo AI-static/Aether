@@ -1,4 +1,5 @@
 from .ezlink.image import ezlink_image_client
+from .ezlink.client import ezlink_client
 from .vectorai.client import vectorai_client
 
 __all__ = [

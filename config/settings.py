@@ -32,7 +32,8 @@ class Settings(BaseSettings):
 
     vectorai_base_url: Optional[str] = "https://api.vectortara.com/v1"
     vectorai_api_key: Optional[str] = None  # VectorAI API密钥
-    
+
+    agentbay_api_key: Optional[str] = ""
     # 加密配置
     encryption_master_key: Optional[str] = None  # 32字节十六进制字符串，用于API密钥加密
     

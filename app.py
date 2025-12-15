@@ -68,8 +68,10 @@ def register_routes(app: Sanic):
     # 注册业务路由
     from api.routes.image import bp as image_bp
     from api.routes.identity import identity_bp
+    from api.routes.connectors import connectors_bp
     app.blueprint(image_bp)
     app.blueprint(identity_bp)
+    app.blueprint(connectors_bp)
 
 
 def setup_database(app: Sanic):
@@ -79,5 +81,5 @@ def setup_database(app: Sanic):
     async def create_db(app: Sanic, loop):
         # 初始化ORM
         await Tortoise.init(config=create_db_config())
-        await Tortoise.generate_schemas()
+        # await Tortoise.generate_schemas()
         logger.info(f"✅ 初始化ORM成功")
