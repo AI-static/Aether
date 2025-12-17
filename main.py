@@ -9,8 +9,8 @@ if __name__ == '__main__':
     # 启动 Sanic 应用
     app.run(
         host="0.0.0.0", 
-        port=settings.app_port, 
-        debug=settings.app_debug, 
-        auto_reload=settings.app_auto_reload
+        port=settings.app.port,
+        debug=settings.app.debug,
+        auto_reload=settings.app.env == "dev"
     )
 

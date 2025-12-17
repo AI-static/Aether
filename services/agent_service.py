@@ -12,13 +12,13 @@ from agno.tools import tool
 from agno.db.postgres import PostgresDb
 
 db = PostgresDb(
-    db_url=f"postgresql+psycopg://{settings.db_user}:{settings.db_password}@{settings.db_host}:{settings.db_port}/{settings.db_name}"
+    db_url=f"postgresql+psycopg://{settings.database.user}:{settings.database.password}@{settings.database.host}:{settings.database.port}/{settings.database.name}"
 )
 
 memory_manager = MemoryManager(
     db=db,
     # Select the model used for memory creation and updates. If unset, the default model of the Agent is used.
-    model=OpenAIChat(base_url=settings.vectorai_base_url, api_key=settings.vectorai_api_key,id="gpt-5-mini"),
+    model=OpenAIChat(base_url=settings.external_service.vectorai_base_url, api_key=settings.external_service.vectorai_api_key,id="gpt-5-mini"),
     # You can also provide additional instructions
     additional_instructions="Don't store the user's real name",
 )

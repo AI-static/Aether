@@ -32,89 +32,64 @@ class BaseConnector(ABC):
             raise ValueError("AGENTBAY_API_KEY is required")
 
         self.agent_bay = AgentBay(api_key=self.api_key)
-        self.session = None  # 当前会话对象
-        self.context_id = None  # 当前上下文ID
-
-    async def init_session(self, context_id: Optional[str] = None) -> bool:
-        """初始化浏览器会话
-
-        Args:
-            context_id: 可选的上下文ID
-        Returns:
-            bool: 初始化是否成功
-        """
-        try:
-            # 如果已有会话，先清理
-            if self.session:
-                self.cleanup()
-
-            self.context_id = context_id
-            browser_context = None
-            logger.info(f"self.context_id {self.context_id}")
-            if self.context_id:
-                # 同步上下文，一般用于保留登陆状态的情况
-                browser_context = BrowserContext(self.context_id, auto_upload=True)
-
-            session_result = self.agent_bay.create(
-                CreateSessionParams(
-                    image_id="browser_latest",
-                    browser_context=browser_context
-                )
-            )
-
-            if not session_result.success:
-                raise RuntimeError(f"Failed to create session: {session_result.error_message}")
-
-            self.session = session_result.session
-
-            # 初始化浏览器
-            screen_option = BrowserScreen(width=1920, height=1080)
-            browser_init_options = BrowserOption(
-                screen=screen_option,
-                solve_captchas=True,
-                use_stealth=True,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                fingerprint=BrowserFingerprint(
-                    devices=["desktop"],
-                    operating_systems=["windows"],
-                    locales=self.get_locale(),
-                ),
-            )
-
-            ok = await self.session.browser.initialize_async(browser_init_options)
-            if not ok:
-                raise RuntimeError("Failed to initialize browser")
-
-            logger.info(f"[{self.platform_name}] Session initialized: {self.session.session_id}")
-            return True
-
-        except Exception as e:
-            logger.error(f"[{self.platform_name}] Failed to initialize session: {e}")
-            return False
 
     def get_locale(self) -> List[str]:
         """获取浏览器语言设置，子类可重写"""
         return ["zh-CN"]
 
-    async def _ensure_session(self, context_id=None):
-        """确保会话已初始化"""
-        if not self.session:
-            await self.init_session(context_id)
-
-    async def _get_browser_context(self, context_id=None) -> Tuple[Any, Any, Any]:
+    async def _get_browser_context(self, context_id=None) -> Tuple[Any, Any, Any, Any]:
         """获取浏览器上下文（连接到 CDP）
 
         Returns:
             tuple: (playwright, browser, context)
         """
-        await self._ensure_session(context_id)
-        endpoint_url = self.session.browser.get_endpoint_url()
-
+        # 每次调用都创建新的 session
         p = await async_playwright().start()
+        
+        # 创建浏览器会话
+        browser_context = None
+        if context_id:
+            browser_context = BrowserContext(context_id, auto_upload=True)
+
+        session_result = self.agent_bay.create(
+            CreateSessionParams(
+                image_id="browser_latest",
+                browser_context=browser_context
+            )
+        )
+
+        if not session_result.success:
+            p.stop()
+            raise RuntimeError(f"Failed to create session: {session_result.error_message}")
+
+        session = session_result.session
+
+        # 初始化浏览器选项
+        screen_option = BrowserScreen(width=1920, height=1080)
+        browser_init_options = BrowserOption(
+            screen=screen_option,
+            solve_captchas=True,
+            use_stealth=True,
+            fingerprint=BrowserFingerprint(
+                devices=["desktop"],
+                operating_systems=["windows"],
+                locales=self.get_locale(),
+            ),
+        )
+
+        ok = await session.browser.initialize_async(browser_init_options)
+        if not ok:
+            session.delete()
+            p.stop()
+            raise RuntimeError("Failed to initialize browser")
+
+        # 连接到 CDP
+        endpoint_url = session.browser.get_endpoint_url()
         browser = await p.chromium.connect_over_cdp(endpoint_url)
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
 
-        return p, browser, context
+        # 返回时包含 session，方便后续清理
+        return p, browser, context, session
 
     async def _create_persistent_context_by_cookies(self,
                                                     context_id: str,
@@ -134,6 +109,7 @@ class BaseConnector(ABC):
         Returns:
             str|None: 成功返回 context_id，失败返回 None
         """
+        session = None
         try:
             # Step 1: Create or get persistent context
             logger.info(f"[{self.platform_name}] Creating context '{context_id}'...")
@@ -162,14 +138,14 @@ class BaseConnector(ABC):
                 return None
                 
             # Store the session for later use
-            self.session = session_result.session
-            logger.info(f"[{self.platform_name}] Session created with ID: {self.session.session_id}")
+            session = session_result.session
+            logger.info(f"[{self.platform_name}] Session created with ID: {session.session_id}")
             
             # Step 3: Initialize browser and set cookies
             logger.info(f"[{self.platform_name}] Initializing browser and setting cookies...")
             
             # Initialize browser with minimal options
-            init_success = self.session.browser.initialize(BrowserOption())
+            init_success = session.browser.initialize(BrowserOption())
             
             if not init_success:
                 logger.error(f"[{self.platform_name}] Failed to initialize browser")
@@ -178,7 +154,7 @@ class BaseConnector(ABC):
             logger.info(f"[{self.platform_name}] Browser initialized successfully")
             
             # Get endpoint URL
-            endpoint_url = self.session.browser.get_endpoint_url()
+            endpoint_url = session.browser.get_endpoint_url()
             if not endpoint_url:
                 logger.error(f"[{self.platform_name}] Failed to get browser endpoint URL")
                 return None
@@ -221,7 +197,7 @@ class BaseConnector(ABC):
             if is_logged_in:
                 logger.info(f"[{self.platform_name}] Login successful, saving session with context sync...")
                 # Delete session and sync context to save cookies
-                delete_result = self.agent_bay.delete(self.session, sync_context=True)
+                delete_result = self.agent_bay.delete(session, sync_context=True)
 
                 if delete_result.success:
                     logger.info(f"[{self.platform_name}] Session saved successfully (RequestID: {delete_result.request_id})")
@@ -236,11 +212,18 @@ class BaseConnector(ABC):
             else:
                 logger.warning(f"[{self.platform_name}] Login failed - invalid cookies")
                 # Delete session without saving
-                self.agent_bay.delete(self.session, sync_context=False)
+                self.agent_bay.delete(session, sync_context=False)
 
         except Exception as e:
             logger.error(f"[{self.platform_name}] Error creating persistent context: {e}", exc_info=True)
             return None
+        finally:
+            # Clean up session if it exists
+            if session:
+                try:
+                    self.agent_bay.delete(session, sync_context=False)
+                except:
+                    pass
 
     async def _extract_page_content(
         self,
@@ -258,15 +241,9 @@ class BaseConnector(ABC):
         Returns:
             tuple: (成功标志, 提取的数据)
         """
-        if not self.session:
-            raise RuntimeError("Session not initialized")
-
-        agent = self.session.browser.agent
-
-        return await agent.extract_async(
-            ExtractOptions(instruction=instruction, use_text_extract=True, schema=schema),
-            page=page
-        )
+        # 需要传入 session 才能使用 agent
+        # 这个方法现在需要在子类中重写，传入 session
+        raise NotImplementedError("This method needs to be overridden in subclass with session parameter")
 
     # ==================== 需要子类实现的抽象方法 ====================
 
@@ -662,19 +639,4 @@ class BaseConnector(ABC):
                 "method": "fast_playwright_extraction"
             }
 
-    # ==================== 辅助方法 ====================
-
-    def cleanup(self):
-        """清理资源"""
-        if self.session:
-            try:
-                self.session.delete()
-                logger.info(f"[{self.platform_name}] Session cleaned up: {self.session.session_id}")
-            except Exception as e:
-                logger.error(f"[{self.platform_name}] Error cleaning up session: {e}")
-            finally:
-                self.session = None
-
-    def __del__(self):
-        """析构时自动清理"""
-        self.cleanup()
+  

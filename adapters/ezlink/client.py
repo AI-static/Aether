@@ -9,8 +9,8 @@ class EzlinkAIAdapter(AsyncOpenAI):
     def __init__(self):
         # 初始化OpenAI客户端，但使用VectorAI的配置
         super().__init__(
-            api_key=settings.ezlink_api_key or "",
-            base_url=settings.ezlink_base_url,
+            api_key=settings.external_service.ezlink_api_key or "",
+            base_url=settings.external_service.ezlink_base_url,
             timeout=300.0
         )
 

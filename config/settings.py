@@ -1,85 +1,133 @@
-from pydantic_settings import BaseSettings
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+from enum import Enum
 
 
-class Settings(BaseSettings):
+# ==================================
+# 环境枚举
+# ==================================
+class LogLevel(str, Enum):
+    """日志级别枚举"""
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
+# ==================================
+# 配置模型
+# ==================================
+class AppConfig(BaseModel):
     """应用配置"""
-    
-    # 应用配置
-    app_name: str = "Aether"
-    app_description: str = "业务适配层服务"  # 应用描述
-    app_port: int = 8000
-    app_debug: bool = False
-    app_auto_reload: bool = False
-
-    # 日志配置
-    log_level: str = "INFO"  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
-    log_to_file: bool = True  # 是否写入文件
-    log_to_console: bool = True  # 是否输出到控制台
-    log_file_path: str = "logs/app.log"  # 日志文件路径
-    log_file_rotation: str = "1 day"  # 日志轮转: 1 day, 1 week, 1 month
-    log_file_retention: str = "30 days"  # 日志保留时间
-
-    pg_host: str = "localhost"
-    pg_port: int = 5432
-    pg_user: str = None
-    pg_password: str = ""
-    pg_database: str = 'aether'
-    
-    # 其他服务配置
-    ezlink_base_url: Optional[str] = "https://api.ezlinkai.com/v1"
-    ezlink_api_key: Optional[str] = None
-
-    vectorai_base_url: Optional[str] = "https://api.vectortara.com/v1"
-    vectorai_api_key: Optional[str] = None  # VectorAI API密钥
-
-    agentbay_api_key: Optional[str] = ""
-    # 加密配置
-    encryption_master_key: Optional[str] = None  # 32字节十六进制字符串，用于API密钥加密
-    
-    # OSS配置
-    oss_access_key_id: Optional[str] = None  # OSS访问密钥ID
-    oss_access_key_secret: Optional[str] = None  # OSS访问密钥Secret
-    oss_endpoint: str = "https://oss-cn-hangzhou.aliyuncs.com"  # OSS端点
-    oss_bucket_name: Optional[str] = None  # OSS存储桶名称
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    name: str = Field(default="Aether", description="服务名称")
+    description: str = Field(default="浏览器自动化服务", description="应用描述")
+    port: int = Field(default=1111, description="服务端口")
+    debug: bool = Field(default=False, description="调试模式")
+    env: str = Field(default="dev", description="环境")
 
 
-# 创建全局配置实例
-settings = Settings()
+class AgentBayConfig(BaseModel):
+    """AgentBay配置"""
+    api_key: Optional[str] = Field(default=None, description="AgentBay API密钥")
+    base_url: Optional[str] = Field(default=None, description="AgentBay API地址")
 
-# 兼容旧代码的引用
+
+class DatabaseConfig(BaseModel):
+    """数据库配置"""
+    host: str = Field(default="localhost", description="数据库主机")
+    port: int = Field(default=5432, description="数据库端口")
+    user: Optional[str] = Field(default=None, description="数据库用户名")
+    password: Optional[str] = Field(default="", description="数据库密码")
+    name: str = Field(default="browser_automation", description="数据库名")
+    schema_name: str = Field(default="public", description="模式名")
+    max_connections: int = Field(default=100, description="最大连接数")
+    min_connections: int = Field(default=10, description="最小连接数")
+
+class LoggerConfig(BaseModel):
+    """日志配置"""
+    level: LogLevel = Field(default=LogLevel.INFO, description="日志级别")
+    to_console: bool = Field(default=True, description="是否输出到控制台")
+    to_file: bool = Field(default=True, description="是否写入文件")
+    file_path: str = Field(default="logs/app.log", description="日志文件路径")
+    file_rotation: str = Field(default="1 day", description="文件存储天数")
+    file_retention: str = Field(default="30 days", description="")
+
+
+class ExternalServiceConfig(BaseModel):
+    """外部服务配置"""
+    ezlink_base_url: Optional[str] = Field(default=None, description="EzLink API基础URL")
+    ezlink_api_key: Optional[str] = Field(default=None, description="EzLink API密钥")
+    vectorai_base_url: Optional[str] = Field(default=None, description="VectorAI API基础URL")
+    vectorai_api_key: Optional[str] = Field(default=None, description="VectorAI API密钥")
+
+
+class SecurityConfig(BaseModel):
+    """安全配置"""
+    encryption_key: Optional[str] = Field(default=None, description="apikey的加密密钥")
+
+
+class OSSConfig(BaseModel):
+    """OSS对象存储配置"""
+    access_key_id: Optional[str] = Field(default=None, description="OSS访问密钥ID")
+    access_key_secret: Optional[str] = Field(default=None, description="OSS访问密钥Secret")
+    endpoint: str = Field(default="https://oss-cn-beijing.aliyuncs.com", description="OSS端点")
+    bucket_name: Optional[str] = Field(default=None, description="OSS存储桶名称")
+
+
+# ==================================
+# 全局设置
+# ==================================
+class GlobalSettings(BaseSettings):
+    """全局配置设置"""
+    app: AppConfig = Field(default_factory=AppConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    logger: LoggerConfig = Field(default_factory=LoggerConfig)
+    agentbay: AgentBayConfig = Field(default_factory=AgentBayConfig)
+    external_service: ExternalServiceConfig = Field(default_factory=ExternalServiceConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    oss: OSSConfig = Field(default_factory=OSSConfig)
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="allow",
+        env_nested_delimiter="__",
+    )
+
+
+# ==================================
+# 全局实例
+# ==================================
+settings = GlobalSettings()
 global_settings = settings
 
 
-
-def create_db_config() -> dict:
+# ==================================
+# 数据库配置创建函数
+# ==================================
+def create_db_config():
+    """创建Tortoise ORM数据库配置"""
     return {
         "connections": {
             "default": {
                 "engine": "tortoise.backends.asyncpg",
                 "credentials": {
-                    "host": global_settings.pg_host,
-                    "port": global_settings.pg_port,
-                    "user": global_settings.pg_user,
-                    "password": global_settings.pg_password,
-                    "database": global_settings.pg_database,
-                    "schema": "public",
-                    "maxsize": 500,
-                    "minsize": 10,
-                    "command_timeout": 30,  # 增加超时时间
+                    "host": settings.database.host,
+                    "port": settings.database.port,
+                    "user": settings.database.user,
+                    "password": settings.database.password,
+                    "database": settings.database.name,
+                    "schema": settings.database.schema_name,
+                    "maxsize": settings.database.max_connections,
+                    "minsize": settings.database.min_connections,
+                    "command_timeout": 30,
                     "server_settings": {
-                        # PostgreSQL服务器设置
-                        "application_name": global_settings.app_name,
-                        "tcp_keepalives_idle": "300",
-                        "tcp_keepalives_interval": "30",
-                        "tcp_keepalives_count": "3",
+                        "application_name": settings.app.name,
                     },
-                    # SSL设置（可能影响性能）
-                    "ssl": "prefer",  # 或 False, True, "require"
+                    "ssl": "prefer",
                 }
             }
         },

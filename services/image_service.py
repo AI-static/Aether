@@ -5,7 +5,6 @@ from utils.logger import logger
 from utils.exceptions import BusinessException
 from api.schema.base import ErrorCode
 from models.images import get_model_info, ProviderEnum
-from config.settings import settings
 from utils.oss import oss_client
 from datetime import datetime
 import hashlib

@@ -66,24 +66,24 @@ class LoggingManager:
     def _setup_logging(self):
         """设置日志配置"""
         # 创建日志目录
-        if settings.log_file_path and settings.log_to_file:
-            log_file_path = Path(settings.log_file_path)
+        if settings.logger.to_file and settings.logger.to_file:
+            log_file_path = Path(settings.logger.to_file)
             log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
             loguru_logger.add(
-                settings.log_file_path,
-                level=settings.log_level,
-                rotation=settings.log_file_rotation,
-                retention=settings.log_file_retention,
+                settings.logger.file_path,
+                level=settings.logger.level,
+                rotation=settings.logger.file_rotation,
+                retention=settings.logger.file_retention,
                 compression="zip",
                 encoding="utf-8"
             )
         
         # 控制台输出配置
-        if settings.log_to_console:
+        if settings.logger.to_console:
             loguru_logger.add(
                 sys.stdout,
-                level=settings.log_level,
+                level=settings.logger.level,
                 colorize=True
             )
     

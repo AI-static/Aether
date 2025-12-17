@@ -81,5 +81,5 @@ def setup_database(app: Sanic):
     async def create_db(app: Sanic, loop):
         # 初始化ORM
         await Tortoise.init(config=create_db_config())
-        # await Tortoise.generate_schemas()
+        await Tortoise.generate_schemas()
         logger.info(f"✅ 初始化ORM成功")

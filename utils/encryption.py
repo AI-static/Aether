@@ -1,11 +1,8 @@
 """加密工具模块 - 提供AES-256加密/解密功能"""
 
 import base64
-import os
+from config.settings import settings
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from typing import Optional, Tuple
 import secrets
 from utils.logger import logger
 
@@ -125,10 +122,9 @@ def get_encryption() -> AESEncryption:
     """获取全局加密实例"""
     global _encryption_instance
     if _encryption_instance is None:
-        from config.settings import settings
-        if not settings.encryption_master_key:
+        if not settings.security.encryption_key:
             raise ValueError("未设置 encryption_master_key 配置")
-        _encryption_instance = AESEncryption(settings.encryption_master_key)
+        _encryption_instance = AESEncryption(settings.security.encryption_key)
     return _encryption_instance
 
 

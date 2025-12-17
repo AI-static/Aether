@@ -297,10 +297,10 @@ class OSSAsyncClient:
 
 # 创建全局OSS客户端实例
 oss_client = OSSAsyncClient(
-    access_key_id=settings.oss_access_key_id,
-    access_key_secret=settings.oss_access_key_secret,
-    endpoint=settings.oss_endpoint,
-    bucket_name=settings.oss_bucket_name
+    access_key_id=settings.oss.access_key_id,
+    access_key_secret=settings.oss.access_key_secret,
+    endpoint=settings.oss.endpoint,
+    bucket_name=settings.oss.bucket_name
 )
 
 # 保留获取函数以便兼容
