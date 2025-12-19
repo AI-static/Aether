@@ -80,7 +80,7 @@ class WeChatCallback:
             except ValueError:
                 logger.warning("Invalid timestamp")
             
-            logger.debug("URL verification successful")
+            logger.info("URL verification successful")
             return decrypted_echostr
             
         except Exception as e:
@@ -101,7 +101,6 @@ class WeChatCallback:
         Returns:
             解密后的消息字典，失败返回None
         """
-        logger.debug("Decrypting callback message")
         
         try:
             # 1. 验证签名
@@ -121,7 +120,7 @@ class WeChatCallback:
                 logger.error("XML parsing failed")
                 return None
             
-            logger.debug(f"Message decrypted: {msg_data.get('MsgType', 'unknown')}")
+            logger.info(f"Message decrypted successfully, type: {msg_data.get('MsgType', 'unknown')}")
             return msg_data
             
         except Exception as e:
@@ -156,29 +155,28 @@ class WeChatCallback:
         is_valid = hash_code.lower() == msg_signature.lower()
         
         if not is_valid:
-            logger.debug(f"Signature mismatch - expected: {msg_signature}, calculated: {hash_code}")
-        else:
-            logger.debug("Signature verified")
+            logger.error(f"Signature mismatch - expected: {msg_signature}, calculated: {hash_code}")
         
         return is_valid
     
     def _decrypt_message(self, encrypted_msg: str) -> Optional[str]:
         """
-        解密消息
+        解密消息 - 严格按照企业微信官方文档流程
         
         Args:
-            encrypted_msg: Base64编码的加密消息
+            encrypted_msg: Base64编码的加密消息 (msg_encrypt)
             
         Returns:
             解密后的明文，失败返回None
         """
         try:
-            # Base64解码
+            # 1. 对密文BASE64解码
             encrypted_data = base64.b64decode(encrypted_msg)
             
-            # 企业微信消息格式：msg_len(4字节) + msg + corp_id(随机字符串)
-            # AES-256-CBC模式，IV=密钥前16字节
+            # 2. 使用AESKey做AES-256-CBC解密
+            # IV = AESKey前16字节
             iv = self.aes_key[:16]
+            
             cipher = Cipher(
                 algorithms.AES(self.aes_key),
                 modes.CBC(iv),
@@ -189,22 +187,43 @@ class WeChatCallback:
             # 解密
             decrypted_data = decryptor.update(encrypted_data) + decryptor.finalize()
             
-            # 去除PKCS7填充
+            # 3. 去除PKCS7填充
             unpadder = padding.PKCS7(128).unpadder()
             unpadded_data = unpadder.update(decrypted_data) + unpadder.finalize()
             
-            # 提取消息内容（前4字节是消息长度）
-            msg_len = int.from_bytes(unpadded_data[:4], byteorder='big')
-            message = unpadded_data[4:4 + msg_len].decode('utf-8')
+            # 4. 根据文档解析：rand_msg = random(16B) + msg_len(4B) + msg + receiveid
+            # 4.1 去掉rand_msg头部的16个随机字节
+            if len(unpadded_data) < 16:
+                logger.error(f"Data too short to contain random bytes: {len(unpadded_data)}")
+                return None
+                
+            content = unpadded_data[16:]  # 去掉前16随机字节
             
-            # 后面的是corp_id，可以验证但不必须
-            # corp_id_len = len(unpadded_data) - 4 - msg_len
-            # corp_id = unpadded_data[4 + msg_len:].decode('utf-8')
+            # 4.2 取出4字节的msg_len
+            if len(content) < 4:
+                logger.error("Data too short to contain msg_len")
+                return None
+                
+            msg_len = int.from_bytes(content[0:4], byteorder='big')  # 网络字节序
             
-            return message
+            # 4.3 截取msg_len长度的部分即为msg
+            if len(content) < 4 + msg_len:
+                logger.error(f"Data incomplete: need {4 + msg_len} bytes, have {len(content)}")
+                return None
+                
+            msg = content[4:4 + msg_len].decode('utf-8')
+            
+            # 4.4 剩余字节为receiveid
+            receiveid = content[4 + msg_len:].decode('utf-8')
+            logger.info(f"Successfully decrypted message, receiveid: {receiveid}")
+            
+            # 5. 验证receiveid（对于企业应用回调，receiveid应该是corp_id）
+            # 这里可以添加corp_id验证逻辑
+            
+            return msg
             
         except Exception as e:
-            logger.debug(f"Decryption failed: {e}")
+            logger.error(f"Decryption failed with error: {e}")
             return None
     
     def _parse_xml_message(self, xml_content: str) -> Optional[Dict[str, Any]]:
@@ -233,7 +252,6 @@ class WeChatCallback:
             # 特殊处理某些消息类型
             if 'MsgType' in msg_data:
                 msg_type = msg_data['MsgType']
-                logger.debug(f"Msg type: {msg_type}")
                 
                 # 根据消息类型进行特殊处理
                 if msg_type == 'text':
@@ -245,21 +263,20 @@ class WeChatCallback:
                 elif msg_type == 'event':
                     # 事件消息，包含Event类型
                     event = msg_data.get('Event', '')
-                    logger.debug(f"Event: {event}")
                     
                     # 特殊事件处理
                     if event == 'subscribe':
                         # 关注事件
-                        logger.debug("User subscribe")
+                        logger.info("User subscribe event")
                     elif event == 'unsubscribe':
                         # 取消关注事件
-                        logger.debug("User unsubscribe")
+                        logger.info("User unsubscribe event")
                     elif event == 'click':
                         # 菜单点击事件
-                        logger.debug(f"Menu click: {msg_data.get('EventKey', '')}")
+                        logger.info(f"Menu click event: {msg_data.get('EventKey', '')}")
                     elif event == 'view':
                         # 链接跳转事件
-                        logger.debug(f"Link view: {msg_data.get('EventKey', '')}")
+                        logger.info(f"Link view event: {msg_data.get('EventKey', '')}")
             
             return msg_data
             

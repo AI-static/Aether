@@ -41,6 +41,14 @@ async def wechat_verify_url(request: Request):
         nonce = request.args.get('nonce', '')
         echostr = request.args.get('echostr', '')
         
+        # 对echostr进行URL解码（企业微信的echostr是URL编码的）
+        import urllib.parse
+        if echostr:
+            echostr = urllib.parse.unquote(echostr)
+        
+        logger.info(f"Original echostr: {request.args.get('echostr', '')[:50]}...")
+        logger.info(f"URL decoded echostr length: {len(echostr)}")
+
         # 获取服务配置
         if not global_settings.im.wechat_token or not global_settings.im.wechat_encoding_aes_key:
             return json({
