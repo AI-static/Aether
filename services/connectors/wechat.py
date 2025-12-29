@@ -3,12 +3,13 @@
 
 import asyncio
 import json
-from agentbay.browser.browser_agent import ActOptions
+from agentbay import ActOptions, CreateSessionParams, BrowserOption, BrowserScreen, BrowserFingerprint
 from typing import Dict, Any, List, Optional, AsyncGenerator
 import aiohttp
 
 from .base import BaseConnector
 from utils.logger import logger
+from utils.exceptions import SessionCreationException, BrowserInitializationException
 from pydantic import BaseModel, Field
 from models.connectors import PlatformType
 from config.settings import settings
@@ -24,31 +25,92 @@ class GzhArticleSummary(BaseModel):
 class WechatConnector(BaseConnector):
     """微信公众号连接器"""
 
-    def __init__(self):
-        super().__init__(platform_name=PlatformType.WECHAT)
+    def __init__(self, playwright):
+        super().__init__(platform_name=PlatformType.WECHAT, playwright=playwright)
         self.rss_url = settings.wechat.rss_url
         self.rss_timeout = settings.wechat.rss_timeout
         self.rss_buffer_size = settings.wechat.rss_buffer_size
 
-    async def login_with_cookies(self,
-                                 cookies: Dict[str, str],
-                                 source: str = "default",
-                                 source_id: str = "default") -> str:
-        # TODO：公众号不需要实现
-        return ""
+    def _build_context_id(self, source: str, source_id: str) -> str:
+        """构建 context_id: xiaohongshu:{source}:{source_id}"""
+        return f"wechat-context:{source}:{source_id}"
+
+    async def _require_login(self, source: str, source_id: str) -> str:
+        """验证并返回有效的 context_id
+
+        Args:
+            source: 系统标识
+            source_id: 用户标识
+
+        Returns:
+            有效的 context_id
+
+        Raises:
+            ValueError: 用户未登录
+        """
+        # 不需要检查
+        context_id = self._build_context_id(source, source_id)
+
+        return context_id
+
+    async def _get_browser_session(
+            self,
+            source: str = "default",
+            source_id: str = "default"
+    ) -> Any:
+        """获取 browser session（使用持久化 context）
+
+        Args:
+            context_id: 持久化上下文ID
+            source: 系统标识
+            source_id: 用户标识
+
+        Returns:
+            session 对象
+        """
+
+        # 使用 context 创建 session
+        session_result = await self.agent_bay.create(
+            CreateSessionParams(
+                image_id="browser_latest"
+            )
+        )
+
+        if not session_result.success:
+            raise SessionCreationException(f"Failed to create session: {session_result.error_message}")
+
+        session = session_result.session
+
+        # 初始化浏览器
+        ok = await session.browser.initialize(BrowserOption(
+            screen=BrowserScreen(width=1920, height=1080),
+            solve_captchas=True,
+            use_stealth=True,
+            fingerprint=BrowserFingerprint(
+                devices=["desktop"],
+                operating_systems=["windows"],
+                locales=self.get_locale(),
+            ),
+        ))
+
+        if not ok:
+            await self.agent_bay.delete(session, sync_context=False)
+            raise BrowserInitializationException("Failed to initialize browser")
+
+        return session
 
     async def extract_summary_stream(
         self,
         urls: List[str],
         concurrency: int=1,
-        context_id: str=None
+        source: str=None,
+        source_id: str=None,
     ):
         """流式提取微信公众号文章摘要，支持并发"""
         # 定义提取指令
         instruction = "根据数据结构提取相关内容，并进行内容总结分析"
 
-        # 初始化一次 session 和 browser context，所有 URL 共享
-        p, browser, context, session = await self._get_browser_context(context_id)
+        session = await self._get_browser_session(source, source_id)
 
         try:
             # 创建信号量来限制并发数
@@ -58,27 +120,19 @@ class WechatConnector(BaseConnector):
                 """提取单个 URL（使用共享的 browser context）"""
                 async with semaphore:
                     logger.info(f"[wechat] Processing URL {idx}/{len(urls)}: {url}")
-
-                    page = None
                     try:
-                        # 在共享的 context 中创建新 page
-                        page = await context.new_page()
-                        await page.goto(url, timeout=60000)
-                        await asyncio.sleep(2)
-
                         # 关闭可能出现的弹窗
                         try:
                             agent = session.browser.agent
+                            nav_msg = await agent.navigate(url)
                             await agent.act_async(
                                 ActOptions(action="如果有弹窗或广告，关闭它们，然后滑动到文章最下边。"),
-                                page=page
                             )
                         except:
                             pass
 
                         # 提取文章内容
                         ok, data = await self._extract_page_content(page, instruction, GzhArticleSummary)
-
                         result = {
                             "url": url,
                             "success": ok,
@@ -113,9 +167,8 @@ class WechatConnector(BaseConnector):
                 yield result
 
         finally:
-            # 所有 URL 处理完后关闭 browser
-            await browser.close()
-            await p.stop()
+            # 所有 URL 处理完后删除 session
+            await self.agent_bay.delete(session, sync_context=False)
 
     async def harvest_user_content(
         self,
@@ -134,22 +187,32 @@ class WechatConnector(BaseConnector):
         self,
         urls: List[str],
         concurrency: int = 3,
-        context_id=None
+        source: str = "default",
+        source_id: str = "default"
     ) -> List[Dict[str, Any]]:
         """快速获取微信文章详情
         
         Args:
             urls: 文章URL列表
             concurrency: 并发数
-            context_id
+            source: 系统标识
+            source_id: 用户标识
         Returns:
             提取结果列表
         """
-        p, browser, context, session = await self._get_browser_context()
+        if not urls:
+            raise ValueError("未输入urls")
+
+        # 获取或创建 session
+        session = await self._get_browser_session(source, source_id)
+        endpoint_url = await session.browser.get_endpoint_url()
+        
+        browser = await self.playwright.chromium.connect_over_cdp(endpoint_url)
+        context = browser.contexts[0]
         
         try:
             semaphore = asyncio.Semaphore(concurrency)
-            
+
             async def extract_detail(url):
                 async with semaphore:
                     page = None
@@ -157,7 +220,7 @@ class WechatConnector(BaseConnector):
                         page = await context.new_page()
                         await page.goto(url, timeout=30000)
                         await page.wait_for_load_state("networkidle", timeout=10000)
-                        
+
                         # 使用evaluate快速提取文章信息
                         article_data = await page.evaluate("""
                             () => {
@@ -227,14 +290,13 @@ class WechatConnector(BaseConnector):
                                 };
                             }
                         """)
-                        
+
                         return {
                             "url": url,
                             "success": True,
                             "data": article_data,
                             "method": "evaluate_extraction"
                         }
-                        
                     except Exception as e:
                         return {
                             "url": url,
@@ -245,21 +307,17 @@ class WechatConnector(BaseConnector):
                     finally:
                         if page:
                             await page.close()
-            
+
             tasks = [extract_detail(url) for url in urls]
             results = await asyncio.gather(*tasks)
-            
+            return results
         finally:
-            await browser.close()
-            await p.stop()
-        
-        return results
+            await self.agent_bay.delete(session, sync_context=False)
     
-    async def extract_by_creator_id(
+    async def harvest_user_content(
         self,
         creator_id: str,
         limit: Optional[int] = None,
-        extract_details: bool = False
     ) -> List[Dict[str, Any]]:
         """通过公众号ID提取文章
         
@@ -423,8 +481,8 @@ class WechatConnector(BaseConnector):
         self,
         keyword: Optional[str] = None,
         limit: int = 20,
-        extract_details: bool = False,
-        context_id = None
+        source: str = "default",
+        source_id: str = "default"
     ) -> List[Dict[str, Any]]:
         """搜索并提取微信文章
         
@@ -433,8 +491,6 @@ class WechatConnector(BaseConnector):
         Args:
             keyword: 搜索关键词（可选，如果不提供则返回所有文章）
             limit: 限制数量
-            extract_details: 是否提取详情
-            context_id
         Returns:
             搜索结果
         """
