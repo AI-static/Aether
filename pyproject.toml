@@ -34,6 +34,7 @@ wuying-agentbay-sdk = "^0.13.1"
 playwright = "^1.57.0"
 redis = "^7.1.0"
 sqlalchemy = "^2.0.45"
+ujson = "^5.11.0"
 
 [tool.ruff]
 target-version = "py311"

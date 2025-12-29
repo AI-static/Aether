@@ -95,8 +95,23 @@ class XiaohongshuDeepAgent:
             if res.get("success"):
                 all_notes.extend(res.get("data", []))
 
+        # === 去重逻辑：基于帖子唯一标识 ===
+        # 使用 note_id 或 full_url 作为唯一标识
+        seen_note_ids = set()
+        unique_notes = []
+
+        for note in all_notes:
+            # 优先使用 note_id，如果没有则使用 full_url
+            note_id = note.get("note_id") or note.get("full_url")
+
+            if note_id and note_id not in seen_note_ids:
+                seen_note_ids.add(note_id)
+                unique_notes.append(note)
+
+        logger.info(f"搜索结果去重: {len(all_notes)} 条 -> {len(unique_notes)} 条唯一帖子")
+
         # 按点赞数倒序，取前 10 个最有价值的
-        sorted_notes = sorted(all_notes, key=lambda x: x.get("liked_count", 0), reverse=True)
+        sorted_notes = sorted(unique_notes, key=lambda x: x.get("liked_count", 0), reverse=True)
         return sorted_notes[:10]
 
     async def _fetch_details(self, notes: List[Dict]) -> str:
