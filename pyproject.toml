@@ -3,10 +3,10 @@
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
-name = "aether"
+name = "micro-sniper"
 version = "0.1.0"
 description = "业务适配层服务"
-authors = ["yancyyu \u003cyancyyu.ok@gmail.com\u003e"]
+authors = ["yancyyu yancyyu.ok@gmail.com"]
 readme = "README.md"
 packages = [{include = "**/*.py"}]  # 包含所有Python文件
 

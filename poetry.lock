@@ -2,14 +2,14 @@
 
 [[package]]
 name = "agno"
-version = "2.3.16"
+version = "2.3.21"
 description = "Agno: a lightweight library for building Multi-Agent Systems"
 optional = false
 python-versions = "<4,>=3.7"
 groups = ["main"]
 files = [
-    {file = "agno-2.3.16-py3-none-any.whl", hash = "sha256:b8af29bd0404f64a23369470fd900d3226e1d96790974c5ff3cb9552c2880ea8"},
-    {file = "agno-2.3.16.tar.gz", hash = "sha256:bce48925fe6bddcf6c91256faa44c532256c00727f593d320eb3c5e5aaf9efa8"},
+    {file = "agno-2.3.21-py3-none-any.whl", hash = "sha256:bdd4b015c154222d677aee594803e7238a5d336b007e61a0280a8b148e4b62b3"},
+    {file = "agno-2.3.21.tar.gz", hash = "sha256:4c5c1fa585a818a44cc9c8fad0edc2e8dd2884b70f719265b7f900dfb5820f00"},
 ]
 
 [package.dependencies]
@@ -56,7 +56,7 @@ crawl4ai = ["crawl4ai (>=0.6.3)"]
 csv = ["aiofiles"]
 daytona = ["daytona"]
 ddg = ["ddgs"]
-dev = ["PyJWT", "fastapi", "mcp", "mypy (==1.18.2)", "openai", "pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff (==0.14.3)", "timeout-decorator", "types-aiofiles", "types-pyyaml", "uvicorn"]
+dev = ["PyJWT", "fakeredis", "fastapi", "mcp", "mypy (==1.18.2)", "openai", "pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff (==0.14.3)", "timeout-decorator", "types-aiofiles", "types-pyyaml", "uvicorn"]
 docker = ["agno-infra[docker]"]
 docx = ["python-docx"]
 duckdb = ["duckdb"]
@@ -326,14 +326,14 @@ typing-extensions = {version = ">=4.2", markers = "python_version < \"3.13\""}
 
 [[package]]
 name = "aiosqlite"
-version = "0.22.0"
+version = "0.22.1"
 description = "asyncio bridge to the standard sqlite3 module"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "aiosqlite-0.22.0-py3-none-any.whl", hash = "sha256:96007fac2ce70eda3ca1bba7a3008c435258a592b8fbf2ee3eeaa36d33971a09"},
-    {file = "aiosqlite-0.22.0.tar.gz", hash = "sha256:7e9e52d72b319fcdeac727668975056c49720c995176dc57370935e5ba162bb9"},
+    {file = "aiosqlite-0.22.1-py3-none-any.whl", hash = "sha256:21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb"},
+    {file = "aiosqlite-0.22.1.tar.gz", hash = "sha256:043e0bd78d32888c0a9ca90fc788b38796843360c855a7262a532813133a0650"},
 ]
 
 [package.extras]
@@ -385,13 +385,13 @@ alibabacloud_credentials = ">=0.3.4"
 
 [[package]]
 name = "alibabacloud-oss-v2"
-version = "1.2.1"
+version = "1.2.2"
 description = "Alibaba Cloud OSS (Object Storage Service) SDK V2 for Python"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "alibabacloud_oss_v2-1.2.1-py3-none-any.whl", hash = "sha256:a3080d3041f754a87c01944d9d1079e2e9910905d47c76142871d1fc4f63dd01"},
+    {file = "alibabacloud_oss_v2-1.2.2-py3-none-any.whl", hash = "sha256:d138d1bdb38da6cc20d96b96faaeb099062a710a7f3d50f4b4b39a8cfcbdc120"},
 ]
 
 [package.dependencies]
@@ -481,14 +481,14 @@ trio = ["trio (>=0.31.0) ; python_version < \"3.10\"", "trio (>=0.32.0) ; python
 
 [[package]]
 name = "apscheduler"
-version = "3.11.1"
+version = "3.11.2"
 description = "In-process task scheduler with Cron-like capabilities"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "apscheduler-3.11.1-py3-none-any.whl", hash = "sha256:6162cb5683cb09923654fa9bdd3130c4be4bfda6ad8990971c9597ecd52965d2"},
-    {file = "apscheduler-3.11.1.tar.gz", hash = "sha256:0db77af6400c84d1747fe98a04b8b58f0080c77d11d338c4f507a9752880f221"},
+    {file = "apscheduler-3.11.2-py3-none-any.whl", hash = "sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d"},
+    {file = "apscheduler-3.11.2.tar.gz", hash = "sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41"},
 ]
 
 [package.dependencies]
@@ -502,7 +502,7 @@ mongodb = ["pymongo (>=3.0)"]
 redis = ["redis (>=3.0)"]
 rethinkdb = ["rethinkdb (>=2.4.0)"]
 sqlalchemy = ["sqlalchemy (>=1.4)"]
-test = ["APScheduler[etcd,mongodb,redis,rethinkdb,sqlalchemy,tornado,zookeeper]", "PySide6 ; platform_python_implementation == \"CPython\" and python_version < \"3.14\"", "anyio (>=4.5.2)", "gevent ; python_version < \"3.14\"", "pytest", "pytz", "twisted ; python_version < \"3.14\""]
+test = ["APScheduler[etcd,mongodb,redis,rethinkdb,sqlalchemy,tornado,zookeeper]", "PySide6 ; platform_python_implementation == \"CPython\" and python_version < \"3.14\"", "anyio (>=4.5.2)", "gevent ; python_version < \"3.14\"", "pytest", "pytest-timeout", "pytz", "twisted ; python_version < \"3.14\""]
 tornado = ["tornado (>=4.3)"]
 twisted = ["twisted"]
 zookeeper = ["kazoo"]
@@ -2668,18 +2668,19 @@ files = [
 
 [[package]]
 name = "tortoise-orm"
-version = "0.25.2"
+version = "0.25.3"
 description = "Easy async ORM for python, built with relations in mind"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "tortoise_orm-0.25.2-py3-none-any.whl", hash = "sha256:cf0c9148cb83134a8b2299c30658bd0d9f757a7aef9699e0125a151d58e4f9c4"},
-    {file = "tortoise_orm-0.25.2.tar.gz", hash = "sha256:7e09547846eb27664b402a3b095e1d15ab6406ba56641fad260cf2877ca8d4c5"},
+    {file = "tortoise_orm-0.25.3-py3-none-any.whl", hash = "sha256:3c52a53c41f4137aee9ffb3f3de01f30b52ad7767157f9bd9586a910fe839ca3"},
+    {file = "tortoise_orm-0.25.3.tar.gz", hash = "sha256:b6dedd388393624628ec46228c93df361533ceb3925986fa2d1d22debc838a7d"},
 ]
 
 [package.dependencies]
 aiosqlite = ">=0.16.0,<1.0.0"
+anyio = "*"
 asyncpg = {version = "*", optional = true, markers = "extra == \"asyncpg\""}
 iso8601 = {version = ">=2.1.0,<3.0.0", markers = "python_version < \"4.0\""}
 pypika-tortoise = ">=0.6.3,<1.0.0"
@@ -2717,14 +2718,14 @@ telegram = ["requests"]
 
 [[package]]
 name = "tracerite"
-version = "2.1.0"
+version = "2.2.1"
 description = "Human-readable HTML tracebacks for Python exceptions"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "tracerite-2.1.0-py3-none-any.whl", hash = "sha256:448679da72455d8b3f14e756d2af926561fb395c9eb9b76f4130015f3630f246"},
-    {file = "tracerite-2.1.0.tar.gz", hash = "sha256:327ecff4aeb479f6bf97c23ded2dd2581f70505dc3f932d431afde03dba749d8"},
+    {file = "tracerite-2.2.1-py3-none-any.whl", hash = "sha256:1d1e7ac8434ee64e550f083c87c76751b0776741ac1b5329852251006d180178"},
+    {file = "tracerite-2.2.1.tar.gz", hash = "sha256:be7ce6c722219d505fc7f251194c10a450401d97ebd92a205d5b0b86af2ceed6"},
 ]
 
 [package.dependencies]
@@ -2735,14 +2736,14 @@ nb = ["ipykernel (>=6.29.5)", "ipywidgets (>=8.1.8)", "jupyter (>=1.1.1)", "jupy
 
 [[package]]
 name = "typer"
-version = "0.20.0"
+version = "0.21.0"
 description = "Typer, build great CLIs. Easy to code. Based on Python type hints."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "typer-0.20.0-py3-none-any.whl", hash = "sha256:5b463df6793ec1dca6213a3cf4c0f03bc6e322ac5e16e13ddd622a889489784a"},
-    {file = "typer-0.20.0.tar.gz", hash = "sha256:1aaf6494031793e4876fb0bacfa6a912b551cf43c1e63c800df8b1a866720c37"},
+    {file = "typer-0.21.0-py3-none-any.whl", hash = "sha256:c79c01ca6b30af9fd48284058a7056ba0d3bf5cf10d0ff3d0c5b11b68c258ac6"},
+    {file = "typer-0.21.0.tar.gz", hash = "sha256:c87c0d2b6eee3b49c5c64649ec92425492c14488096dfbc8a0c2799b2f6f9c53"},
 ]
 
 [package.dependencies]
