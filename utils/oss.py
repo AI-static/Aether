@@ -73,26 +73,17 @@ class OSSAsyncClient:
             上传是否成功
         """
         try:
-            body = None
             # 处理不同类型的输入
-            if isinstance(file_data, str):
-                if file_data.startswith("data:image/"):
-                    # Extract the base64 data from data URL
-                    _, encoded = file_data.split(",", 1)
-                    # Fix padding: base64 strings must have length multiple of 4
-                    missing_padding = len(encoded) % 4
-                    if missing_padding:
-                        encoded += '=' * (4 - missing_padding)
-                    body = base64.b64decode(encoded)
-                else:
-                    # Assume it's raw base64
-                    # Fix padding: base64 strings must have length multiple of 4
-                    missing_padding = len(file_data) % 4
-                    if missing_padding:
-                        file_data += '=' * (4 - missing_padding)
-                    body = base64.b64decode(file_data)
-            elif isinstance(file_data, bytes):
+            if isinstance(file_data, bytes):
                 body = file_data
+            elif isinstance(file_data, str):
+                # 兼容性处理：如果是 base64 字符串，尝试解码
+                # 但推荐直接传入 bytes（参考官方示例在调用方解码）
+                logger.warning("upload_file received base64 string, recommend decoding to bytes before calling")
+                try:
+                    body = base64.b64decode(file_data)
+                except Exception as e:
+                    raise ValueError(f"Failed to decode base64 string: {e}. Please decode to bytes before calling upload_file()")
             else:
                 # 文件对象
                 body = file_data.read()

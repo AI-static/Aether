@@ -20,23 +20,23 @@ class CheckLoginStatus(BaseModel):
 class SearchItems(BaseModel):
     """搜索结果模型"""
     title: str = Field(description="视频标题")
-    url: str = Field(description="视频链接")
+    url: str = Field(description="视频跳转链接")
     author: str = Field(description="作者昵称")
     liked_count: str = Field(description="点赞数")
+
+class SearchResult(BaseModel):
+    items: List[SearchItems] = Field(description="条目列表")
 
 class CreatorsItems(BaseModel):
     """搜索结果模型"""
     user_id: str = Field(description="抖音号")
     author: str = Field(description="作者昵称")
     fans_count: int = Field(description="粉丝数,单位(个)")
+    url: str = Field(description="用户主页地址")
 
 class CreatorsResult(BaseModel):
     """搜索结果模型"""
     items: List[CreatorsItems] = Field(description="条目列表")
-
-
-class SearchResult(BaseModel):
-    items: List[SearchItems] = Field(description="条目列表")
 
 class VideoDetail(BaseModel):
     """视频详情模型"""
@@ -295,44 +295,35 @@ class DouyinConnector(BaseConnector):
                 nav_result = await session.browser.agent.navigate(f"https://www.douyin.com/jingxuan/search/{creator_id}?type=user")
                 await asyncio.sleep(2)
 
-                # 2. 使用 Agent 搜索创作者
-                search_act = ActOptions(
-                    action=f"""
-                    1. 如果有弹窗，请关闭。
-                    2. 点击第一个用户，进入其主页。
-                    3. 滑动窗口到最下方。
-                    """,
-                    use_vision=True
-                )
-
-                results = await session.browser.agent.act(search_act)
-                logger.info(f"[douyin] Search user action: {results}")
-
-                if not results.success:
-                    return {
-                        "creator_id": creator_id,
-                        "success": False,
-                        "data": "动作未成功"
-                    }
-
-                await asyncio.sleep(5)
-
-                screenshot_b64 = await session.browser.agent.screenshot()
-                object_name = f"抖音获取用户视频截图留证-{int(time.time())}"
-                await oss_client.upload_file(object_name=object_name, file_data=screenshot_b64)
-                screenshot_url.append(oss_client.get_public_url(object_name))
-
-                # 3. 提取用户主页
+                # 3. 提取满足需求的用户列表
                 extract_options = ExtractOptions(
                     instruction=f"""
-                    当前用户的视频信息有哪些，只输出前{limit}个。
-                    """,
-                    schema=SearchResult,
-                    use_text_extract=True,
-                    use_vision=True
+                                符合条件的用户信息详情是什么，只输出前{limit}个。
+                                """,
+                    schema=CreatorsResult,
+                    use_text_extract=True
                 )
-
+                # 提取符合条件的用户列表
                 success, data = await session.browser.agent.extract(extract_options)
+                logger.info(f"extract res1 {success}, {data}")
+
+                if data:
+                    for _ in data.items:
+
+                        results = await session.browser.agent.navigate(_.url)
+                        logger.info(f"[douyin] Search user action: {results}")
+
+                        # 3. 提取用户主页
+                        extract_options = ExtractOptions(
+                            instruction=f"""
+                            当前用户的视频信息详情是什么，只输出前{limit}个。
+                            """,
+                            schema=SearchResult,
+                            use_text_extract=True
+                        )
+
+                        success, data = await session.browser.agent.extract(extract_options)
+                        logger.info(f"extract res {success}, {data}")
 
                 if success and data and data.items:
                     results = [item.model_dump() if hasattr(item, 'model_dump') else item for item in data.items]

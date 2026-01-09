@@ -111,6 +111,11 @@ class TaskTimeoutChecker:
 
         for task in running_tasks:
             # 检查是否超时
+            # 如果 started_at 为 None，跳过检查
+            if task.started_at is None:
+                logger.warning(f"任务 {task.id} ({task.task_type}) 的 started_at 为空，跳过超时检查")
+                continue
+
             # 确保 task.started_at 带有时区信息
             if task.started_at.tzinfo is None:
                 # 如果没有时区，假设是 UTC 并添加时区

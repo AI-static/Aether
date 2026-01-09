@@ -13,8 +13,17 @@ from utils.logger import logger
 from services.sniper.xhs_trend import XiaohongshuTrendAgent
 from services.sniper.xhs_creator import CreatorSniper
 from services.sniper.douyin_trend import DouyinDeepAgent
+from config.settings import global_settings
 
 sniper_bp = Blueprint("sniper", url_prefix="/sniper")
+
+# Agent 时间节省配置（与 list_agents 保持一致）
+AGENT_TIME_SAVINGS: dict[str, int] = {
+    "xhs_trend_agent": 85,
+    "xhs_creator_sniper": 25,
+    "douyin_trend_agent": 85,
+    "douyin_creator_sniper": 25,
+}
 
 # Agent/Workflow 映射表 - 直接存储类对象
 AGENT_WORKFLOW_MAPPING = {
@@ -114,8 +123,8 @@ async def _run_agent_task(agent_class, request: Request, task, **kwargs):
             task=task
         )
 
-        # 设置超时时间（默认 30 分钟，可根据不同 Agent 调整）
-        timeout_seconds = getattr(agent, 'timeout_seconds', 30 * 60)
+        # 设置超时时间（优先使用 Agent 类的配置，否则使用全局配置）
+        timeout_seconds = getattr(agent, 'timeout_seconds', global_settings.task.timeout)
 
         # 使用 asyncio.wait_for 添加超时控制
         try:
@@ -129,7 +138,8 @@ async def _run_agent_task(agent_class, request: Request, task, **kwargs):
             return
 
     except Exception as e:
-        logger.error(f"Agent {agent_class.__name__} 执行失败: {e}")
+        import traceback
+        logger.error(f"Agent {agent_class.__name__} 执行失败: {traceback.format_exc()}")
         await task.fail(str(e), 0)
 
 
@@ -287,7 +297,7 @@ async def list_agents(request: Request):
                     "description": "创作者ID列表",
                     "placeholder": "每行一个创作者ID\n5c4c5848000000001200de55\n657f31eb000000003d036737"
                 },
-                "days": {
+                "latency": {
                     "type": "int",
                     "required": False,
                     "description": "监控天数",
@@ -331,8 +341,92 @@ async def list_agents(request: Request):
         }
     ]
 
+    for agent in agents:
+        agent["time_savings"] = AGENT_TIME_SAVINGS.get(str(agent.get("id", "")), "0")
+
     return json(BaseResponse(
         code=ErrorCode.SUCCESS,
         message="获取成功",
         data={"agents": agents, "total": len(agents)}
     ).model_dump())
+
+
+def format_savings(minutes: int) -> str:
+    """格式化时间节省显示
+
+    Args:
+        minutes: 分钟数
+
+    Returns:
+        格式化后的字符串，如 "2h 30m" 或 "45m"
+    """
+    if minutes >= 60:
+        hours = minutes // 60
+        mins = minutes % 60
+        return f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
+    return f"{minutes}m"
+
+
+@sniper_bp.get("/time-savings")
+async def get_time_savings(request: Request):
+    """获取累计节约时间
+
+    Returns:
+        {
+            "total_savings_minutes": 360,
+            "total_savings_formatted": "6h 0m",
+            "task_count": 5,
+            "breakdown": {
+                "xhs_trend_agent": {"count": 3, "savings": 360},
+                "xhs_creator_sniper": {"count": 2, "savings": 120}
+            }
+        }
+    """
+    try:
+        from models.task import Task, TaskStatus
+
+        auth_info = request.ctx.auth_info
+        task_service = TaskService()
+
+        # 获取所有已完成的任务
+        completed_tasks = await task_service.list_tasks(
+            source=auth_info.source.value,
+            source_id=auth_info.source_id,
+            status=TaskStatus.COMPLETED,
+            limit=1000
+        )
+
+        total_savings = 0
+        breakdown = {}
+
+        for task in completed_tasks:
+            task_type = task.task_type
+
+            # 从配置中获取该 agent 的时间节省值
+            time_savings = AGENT_TIME_SAVINGS.get(task_type, 0)
+            total_savings += time_savings
+
+            # 按任务类型分组统计
+            if task_type not in breakdown:
+                breakdown[task_type] = {"count": 0, "savings": 0}
+            breakdown[task_type]["count"] += 1
+            breakdown[task_type]["savings"] += time_savings
+
+        return json(BaseResponse(
+            code=ErrorCode.SUCCESS,
+            message="获取成功",
+            data={
+                "total_savings_minutes": total_savings,
+                "total_savings_formatted": format_savings(total_savings),
+                "task_count": len(completed_tasks),
+                "breakdown": breakdown
+            }
+        ).model_dump())
+
+    except Exception as e:
+        logger.error(f"获取时间节约失败: {e}")
+        return json(BaseResponse(
+            code=ErrorCode.INTERNAL_ERROR,
+            message=str(e),
+            data=None
+        ).model_dump(), status=500)

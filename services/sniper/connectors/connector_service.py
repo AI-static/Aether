@@ -458,7 +458,18 @@ class ConnectorService:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器退出"""
         if self._task:
+            from models.task import TaskStatus
+
             task_id = str(self._task.id)
+
+            # 如果任务正在运行或等待登录，将其标记为失败
+            if self._task.status in [TaskStatus.RUNNING, TaskStatus.WAITING_LOGIN]:
+                error_msg = "任务被异常终止"
+                if exc_val:
+                    error_msg = f"任务被异常终止: {str(exc_val)}"
+                await self._task.fail(error_msg, current_progress=self._task.progress)
+                logger.warning(f"[ConnectorService] Task {task_id} was {self._task.status}, marked as failed on exit")
+
             # 释放该任务持有的所有锁
             await ConnectorService.release_task_locks(task_id)
             # 从活跃任务集合中移除

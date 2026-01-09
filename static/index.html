@@ -13,6 +13,9 @@
     <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
+    <!-- Agents Sidebar Styles -->
+    <link rel="stylesheet" href="/static/css/agents-sidebar.css">
+
     <style>
         /* ========== CSS VARIABLES ========== */
         :root {
@@ -83,7 +86,7 @@
         /* ========== LAYOUT ========== */
         .app-container {
             display: grid;
-            grid-template-columns: 250px 1fr;  /* 两列布局：Agents Sidebar | Tasks+Console */
+            grid-template-columns: 320px 1fr;  /* 两列布局：Agents Sidebar | Tasks+Console */
             grid-template-rows: 60px 1fr;
             height: 100vh;
             overflow: hidden;
@@ -1626,7 +1629,8 @@
             agents: '/sniper/agents',
             execute: '/sniper/execute',
             task: '/sniper/task',
-            logs: '/sniper/task'
+            logs: '/sniper/task',
+            timeSavings: '/sniper/time-savings'
         };
 
         // 轮询配置
@@ -1645,7 +1649,8 @@
             agents: [],             // 所有 Agent 列表
             tasksByAgent: {},       // { agentId: [tasks] }
             pollIntervals: {},      // { taskId: interval } 支持多任务轮询
-            isModalOpen: false      // Modal 是否打开
+            isModalOpen: false,     // Modal 是否打开
+            isSubmitting: false     // 是否正在提交任务
         };
 
         // =====================================================
@@ -1681,6 +1686,21 @@
                 console.error('Failed to fetch agents:', error);
                 addConsoleLog('error', `Failed to load agents: ${error.message}`);
             }
+        }
+
+        async function fetchTimeSavings() {
+            try {
+                const response = await apiCall(API_ENDPOINTS.timeSavings);
+                if (response.code === 0) {
+                    return response.data;
+                }
+            } catch (error) {
+                console.error('Failed to fetch time savings:', error);
+            }
+            return {
+                total_savings_formatted: '0m',
+                task_count: 0
+            };
         }
 
         async function fetchAgentTasks(agentId) {
@@ -1762,9 +1782,9 @@
                 // Fetch task status
                 const taskData = await fetchTaskStatus(taskId);
 
-                // 更新任务列表中的进度
-                if (taskData && isSelected) {
-                    // 更新本地缓存中的任务数据
+                // 始终更新本地缓存中的任务数据（无论是否选中）
+                let taskUpdated = false;
+                if (taskData) {
                     for (const agentId in state.tasksByAgent) {
                         const task = state.tasksByAgent[agentId].find(t => (t.task_id || t.id) === taskId);
                         if (task) {
@@ -1773,12 +1793,15 @@
                             task.result = taskData.result;
                             task.error = taskData.error;
                             task.logs = taskData.logs;  // 更新日志，确保显示所有日志
+                            taskUpdated = true;
                             break;
                         }
                     }
 
-                    // 刷新任务列表
-                    renderTaskList();
+                    // 如果任务在当前选中的 agent 中，刷新任务列表
+                    if (taskUpdated && isSelected) {
+                        renderTaskList();
+                    }
                 }
 
                 // Fetch task logs (仅在选中时显示)
@@ -1801,13 +1824,24 @@
                     if (taskData) {
                         if (taskData.status === 'completed') {
                             addConsoleLog('success', '✓ Task completed successfully!');
-                            // 注意：不在这里渲染结果，避免与selectTask重复渲染
-                            // 结果会在用户点击任务时通过selectTask渲染
+                            // 刷新任务列表以显示最新状态
+                            if (taskUpdated) {
+                                renderTaskList();
+                            }
+                            // 渲染任务结果
+                            if (taskData.result) {
+                                renderTaskResult(taskData.result);
+                            }
 
                             stopTaskPolling(taskId);
                             return; // Stop execution
                         } else if (taskData.status === 'failed') {
                             addConsoleLog('error', `✗ Task failed: ${taskData.error || 'Unknown error'}`);
+                            // 刷新任务列表以显示最新状态
+                            if (taskUpdated) {
+                                renderTaskList();
+                            }
+
                             stopTaskPolling(taskId);
                             return; // Stop execution
                         } else if (taskData.status === 'running') {
@@ -2004,7 +2038,7 @@
         // RENDERING
         // =====================================================
 
-        function renderAgentList() {
+        async function renderAgentList() {
             const container = document.getElementById('agentsList');
 
             if (state.agents.length === 0) {
@@ -2017,18 +2051,169 @@
                 return;
             }
 
-            container.innerHTML = state.agents.map(agent => `
-                <div class="agent-list-item ${state.selectedAgentId === agent.id ? 'active' : ''}"
-                     onclick="selectAgent('${agent.id}')">
-                    <div class="agent-list-item-icon">
-                        <i class="${agent.icon}"></i>
+            // 按渠道分组
+            const groupedAgents = groupAgentsByChannel(state.agents);
+
+            // 获取动态累计节省时间
+            const timeSavingsData = await fetchTimeSavings();
+
+            // 渲染总节省时间统计
+            let html = `
+                <div class="total-savings">
+                    <span>累计已节省时间</span>
+                    <span class="value">${timeSavingsData.total_savings_formatted}</span>
+                    <span class="task-count">(${timeSavingsData.task_count} 个任务)</span>
+                </div>
+            `;
+
+            // 渲染每个渠道分组
+            Object.entries(groupedAgents).forEach(([channel, agents]) => {
+                html += renderChannelGroup(channel, agents);
+            });
+
+            container.innerHTML = html;
+        }
+
+        // 按渠道分组 agents
+        function groupAgentsByChannel(agents) {
+            const groups = {
+                'xiaohongshu': [],
+                'douyin': [],
+                'wechat': [],
+                'generic': []
+            };
+
+            agents.forEach(agent => {
+                const channel = getAgentChannel(agent);
+                if (groups[channel]) {
+                    groups[channel].push(agent);
+                } else {
+                    groups['generic'].push(agent);
+                }
+            });
+
+            // 过滤掉空分组
+            Object.keys(groups).forEach(key => {
+                if (groups[key].length === 0) {
+                    delete groups[key];
+                }
+            });
+
+            return groups;
+        }
+
+        // 判断 agent 属于哪个渠道
+        function getAgentChannel(agent) {
+            const id = agent.id.toLowerCase();
+            const name = agent.display_name.toLowerCase();
+            const desc = agent.description.toLowerCase();
+
+            if (id.includes('xiaohongshu') || id.includes('xhs') || name.includes('小红书') || desc.includes('小红书')) {
+                return 'xiaohongshu';
+            } else if (id.includes('douyin') || id.includes('tiktok') || name.includes('抖音') || desc.includes('抖音')) {
+                return 'douyin';
+            } else if (id.includes('wechat') || id.includes('weixin') || name.includes('微信') || desc.includes('微信')) {
+                return 'wechat';
+            }
+            return 'generic';
+        }
+
+        // 渲染单个渠道分组
+        function renderChannelGroup(channel, agents) {
+            const channelInfo = getChannelInfo(channel);
+            const channelIcon = channelInfo.icon;
+            const channelName = channelInfo.name;
+
+            return `
+                <div class="channel-group" data-channel="${channel}">
+                    <div class="channel-header" onclick="toggleChannelGroup(this)">
+                        <div class="channel-icon">${channelIcon}</div>
+                        <div class="channel-name">${channelName}</div>
+                        <div class="channel-count">${agents.length}</div>
+                        <i class="fas fa-chevron-down chevron"></i>
                     </div>
-                    <div class="agent-list-item-info">
-                        <div class="agent-list-item-name">${agent.display_name}</div>
-                        <div class="agent-list-item-desc">${agent.description}</div>
+                    <div class="channel-group-content">
+                        ${agents.map(agent => renderAgentCard(agent)).join('')}
                     </div>
                 </div>
-            `).join('');
+            `;
+        }
+
+        // 渲染单个 agent 卡片
+        function renderAgentCard(agent) {
+            const timeSavings = agent.time_savings ? formatTimeSavings(agent.time_savings) : null;
+            const channel = getAgentChannel(agent);
+            const channelTag = getChannelTag(channel);
+
+            return `
+                <div class="agent-card ${state.selectedAgentId === agent.id ? 'active' : ''}"
+                     onclick="selectAgent('${agent.id}')">
+                    <div class="agent-card-header">
+                        <div class="agent-card-icon">
+                            <i class="${agent.icon}"></i>
+                        </div>
+                        <div class="agent-card-info">
+                            <div class="agent-card-name">${agent.display_name}</div>
+                            <div class="agent-card-desc">${agent.description}</div>
+                            ${timeSavings ? `
+                                <div class="time-savings-badge">
+                                    <i class="fas fa-clock icon"></i>
+                                    <span class="prefix">${timeSavings.prefix}</span>
+                                    <span class="text">${timeSavings.value}</span>
+                                    <span class="suffix">${timeSavings.suffix}</span>
+                                </div>
+                            ` : ''}
+                            <div class="channel-tag ${channel}">${channelTag}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 获取渠道信息
+        function getChannelInfo(channel) {
+            const info = {
+                'xiaohongshu': { name: '小红书', icon: '📕' },
+                'douyin': { name: '抖音', icon: '🎵' },
+                'wechat': { name: '微信', icon: '💬' },
+                'generic': { name: '通用', icon: '⚙️' }
+            };
+            return info[channel] || info['generic'];
+        }
+
+        // 获取渠道标签
+        function getChannelTag(channel) {
+            const tags = {
+                'xiaohongshu': '小红书',
+                'douyin': '抖音',
+                'wechat': '微信',
+                'generic': '通用'
+            };
+            return tags[channel] || '通用';
+        }
+
+        // 格式化时间节省显示
+        function formatTimeSavings(minutes) {
+            if (minutes >= 60) {
+                const hours = Math.floor(minutes / 60);
+                const mins = minutes % 60;
+                return {
+                    value: mins > 0 ? `${hours}h ${mins}` : `${hours}h`,
+                    prefix: '你将节省',
+                    suffix: ''
+                };
+            }
+            return {
+                value: `${minutes}`,
+                prefix: '你将节省',
+                suffix: '分钟'
+            };
+        }
+
+        // 展开/折叠渠道分组
+        function toggleChannelGroup(header) {
+            const group = header.parentElement;
+            group.classList.toggle('collapsed');
         }
 
         function renderTaskList() {
@@ -2283,6 +2468,11 @@
         async function submitNewTask(event) {
             event.preventDefault();
 
+            // 防抖：如果正在提交，直接返回
+            if (state.isSubmitting) {
+                return;
+            }
+
             const agent = state.agents.find(a => a.id === state.selectedAgentId);
             if (!agent) return;
 
@@ -2333,6 +2523,16 @@
                 return;
             }
 
+            // 获取提交按钮并禁用
+            const submitButton = document.querySelector('.modal-footer .btn-primary');
+
+            // 设置提交状态
+            state.isSubmitting = true;
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.innerHTML = '<i class="fas fa-spinner spinner"></i> <span>创建中...</span>';
+            }
+
             // 创建任务
             try {
                 const response = await apiCall(API_ENDPOINTS.execute, {
@@ -2357,6 +2557,13 @@
                 }
             } catch (error) {
                 alert(`创建任务失败: ${error.message}`);
+            } finally {
+                // 恢复提交状态
+                state.isSubmitting = false;
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = '<i class="fas fa-play"></i> 运行任务';
+                }
             }
         }
 

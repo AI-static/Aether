@@ -29,7 +29,6 @@ class CreatorSniper:
         self._source = source
         self._source_id = source_id
         self.today = datetime.now().date()
-        self.latency = None  # 将在 execute 中设置
 
     async def execute(
         self,
@@ -183,7 +182,7 @@ class CreatorSniper:
                             }
                         )
 
-                        filter_result = await self._filter_today_notes(notes, connector_service)
+                        filter_result = await self._filter_today_notes(notes, connector_service, latency)
                         today_notes = filter_result.get("today_notes", [])
                         last_note = filter_result.get("last_note")
                         pinned_notes = filter_result.get("pinned_notes", [])
@@ -258,7 +257,7 @@ class CreatorSniper:
             await self._task.fail(str(e), self._task.progress)
             raise
 
-    async def _filter_today_notes(self, notes: List[Dict], connector_service) -> Dict[str, Any]:
+    async def _filter_today_notes(self, notes: List[Dict], connector_service, latency) -> Dict[str, Any]:
         """
         筛选近期发布的笔记
 

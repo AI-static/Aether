@@ -2,6 +2,7 @@
 """连接器基类 - 提取公共逻辑"""
 
 import asyncio
+import base64
 import time
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Tuple
@@ -12,6 +13,7 @@ from agentbay import ExtractOptions, CreateSessionParams, BrowserContext, Browse
 from config.settings import global_settings
 from utils.logger import logger
 from utils.exceptions import ContextNotFoundException, SessionCreationException, BrowserInitializationException
+from utils.oss import oss_client
 import re
 from sanic import Sanic
 
@@ -143,6 +145,83 @@ class BaseConnector(ABC):
                 await self.agent_bay.delete(session, sync_context=True)
         except Exception:
             pass
+
+    async def take_and_save_screenshot(
+        self,
+        session,
+        object_name: str,
+        full_page: bool = False
+    ) -> Optional[str]:
+        """通用截图并保存到 OSS 的方法（参考 AgentBay 官方示例）
+
+        Args:
+            session: AgentBay session 对象
+            object_name: OSS 对象名称（文件路径）
+            full_page: 是否截取整个页面
+
+        Returns:
+            str: OSS 公共访问 URL，如果截图失败则返回 None
+        """
+        try:
+            # 调用 agent.screenshot() 获取 base64 字符串
+            s = await session.browser.agent.screenshot(full_page=full_page)
+
+            # 检查返回值类型
+            if not isinstance(s, str):
+                logger.warning(f"[{self.platform_name_str}] Screenshot failed: non-string response: {type(s)}")
+                return None
+
+            s = s.strip()
+
+            # 检查是否是 data URL 格式
+            if not s.startswith("data:"):
+                logger.warning(f"[{self.platform_name_str}] Unsupported screenshot format (not data URL): {s[:32]}")
+                return None
+
+            # 解析 data URL（格式：data:image/png;base64,xxxxx）
+            try:
+                header, encoded = s.split(",", 1)
+            except ValueError:
+                logger.error(f"[{self.platform_name_str}] Invalid data URL format: {s[:100]}")
+                return None
+
+            # 检查是否是 base64 格式
+            if ";base64" not in header:
+                logger.warning(f"[{self.platform_name_str}] Unsupported data URL (not base64): {header[:64]}")
+                return None
+
+            # 清理 base64 字符串：移除所有空白字符
+            encoded = encoded.replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '')
+
+            # 详细日志：记录原始数据
+            logger.info(f"[{self.platform_name_str}] Screenshot encoded_length={len(encoded)}, first_100={encoded[:100]}, last_10={encoded[-10:]}")
+
+            # 解码 base64 得到 bytes
+            try:
+                screenshot_bytes = base64.b64decode(encoded)
+            except Exception as e:
+                import traceback
+                logger.error(f"[{self.platform_name_str}] Failed to decode base64: {traceback.format_exc()}")
+                logger.error(f"[{self.platform_name_str}] Final encoded_length={len(encoded)}, full_encoded={encoded}")
+                return None
+
+            # 检查解码后的数据
+            if not screenshot_bytes:
+                logger.warning(f"[{self.platform_name_str}] Decoded image is empty")
+                return None
+
+            logger.info(f"[{self.platform_name_str}] Screenshot bytes length: {len(screenshot_bytes)}")
+
+            # 上传到 OSS
+            await oss_client.upload_file(object_name=object_name, file_data=screenshot_bytes)
+            url = oss_client.get_public_url(object_name)
+
+            logger.info(f"[{self.platform_name_str}] Screenshot uploaded successfully: {url}")
+            return url
+
+        except Exception as e:
+            logger.error(f"[{self.platform_name_str}] Failed to take/save screenshot: {e}")
+            return None
 
     def get_locale(self) -> List[str]:
         """获取浏览器语言设置，子类可重写"""

@@ -5,7 +5,7 @@ import asyncio
 import time
 import json
 import base64
-from typing import Dict, Any, List, Optional, Callable, AsyncGenerator, Tuple
+from typing import Dict, Any, List, Optional
 from playwright.async_api import Page
 from datetime import datetime
 
@@ -26,60 +26,6 @@ class XiaohongshuConnector(BaseConnector):
 
     def __init__(self, playwright):
         super().__init__(platform_name=PlatformType.XIAOHONGSHU, playwright=playwright)
-
-    # ==================== 资源管理与通用逻辑  ====================
-
-    async def _batch_execute(
-            self,
-            items: List[Any],
-            processor: Callable[[Any, int, Any, Any], Any],
-            concurrency: int = 2,
-            source: str = "default",
-            source_id: str = "default"
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """通用并发批处理执行器
-
-        Args:
-            items: 待处理的数据列表 (url列表, id列表, keyword列表等)
-            processor: 处理函数，签名需为 async (item, idx, context, session) -> dict
-            concurrency: 并发数
-        """
-        session = None
-        browser = None
-
-        try:
-            # 1. 初始化环境
-            session = await self._get_browser_session(source, source_id)
-            browser, context = await self._connect_cdp(session)
-
-            # 2. 并发控制
-            semaphore = asyncio.Semaphore(concurrency)
-
-            async def worker(item, idx):
-                async with semaphore:
-                    try:
-                        return await processor(item, idx, context, session)
-                    except Exception as e:
-                        logger.error(f"[xiaohongshu] Worker error processing {item}: {e}")
-                        return {
-                            "item": item,
-                            "success": False,
-                            "error": str(e)
-                        }
-
-            # 3. 创建任务
-            tasks = [asyncio.create_task(worker(item, idx)) for idx, item in enumerate(items)]
-
-            # 4. 实时产生结果
-            for completed_task in asyncio.as_completed(tasks):
-                yield await completed_task
-
-        except Exception as e:
-            logger.error(f"[xiaohongshu] Batch execution failed: {e}")
-            raise
-        finally:
-            # 5. 统一清理
-            await self._cleanup_resources(session, browser)
 
     # ==================== 业务逻辑：登录与发布 ====================
 
@@ -395,35 +341,55 @@ class XiaohongshuConnector(BaseConnector):
     ) -> List[Dict[str, Any]]:
         """批量抓取创作者笔记"""
 
-        async def _process(creator_id: str, idx: int, context: Any, session: Any):
-            logger.info(f"[xiaohongshu] Harvesting creator {idx + 1}: {creator_id}")
-            page = await context.new_page()
-            try:
-                await page.goto(f"https://www.xiaohongshu.com/user/profile/{creator_id}", timeout=60000)
+        # 获取 session（一次创建，整个方法内复用）
+        session = await self._get_browser_session(source, source_id)
+        browser = None
+
+        try:
+            browser, context = await self._connect_cdp(session)
+
+            async def _process(creator_id: str, idx: int):
                 await asyncio.sleep(1)
+                logger.info(f"[xiaohongshu] Harvesting creator {idx + 1}/{len(creator_ids)}: {creator_id}")
+                page = await context.new_page()
+                try:
+                    await page.goto(f"https://www.xiaohongshu.com/user/profile/{creator_id}", timeout=60000)
+                    await asyncio.sleep(2)
 
-                # 提取 Initial State
-                raw_data = await self._extract_initial_state(page, "user.notes")
-                if not raw_data:
-                    return {"creator_id": creator_id, "success": False, "error": "No notes found"}
+                    # 提取 Initial State
+                    raw_data = await self._extract_initial_state(page, "user.notes")
+                    if not raw_data:
+                        return {"creator_id": creator_id, "success": False, "error": "No notes found"}
 
-                # 解析数据
-                all_feeds = []
-                for feed_group in raw_data:  # notes 是个数组的数组
-                    if feed_group: all_feeds.extend(feed_group)
+                    # 解析数据
+                    all_feeds = []
+                    for feed_group in raw_data:  # notes 是个数组的数组
+                        if feed_group: all_feeds.extend(feed_group)
 
-                parsed_notes = [self._parse_feed_item(item) for item in all_feeds]
-                if limit:
-                    parsed_notes = parsed_notes[:limit]
+                    parsed_notes = [self._parse_feed_item(item) for item in all_feeds]
+                    if limit:
+                        parsed_notes = parsed_notes[:limit]
 
-                return {"creator_id": creator_id, "success": True, "data": parsed_notes}
-            finally:
-                await page.close()
+                    return {"creator_id": creator_id, "success": True, "data": parsed_notes}
+                finally:
+                    await page.close()
 
-        results = []
-        async for result in self._batch_execute(creator_ids, _process, concurrency, source, source_id):
-            results.append(result)
-        return results
+            # 并发控制
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def worker(creator_id, idx):
+                async with semaphore:
+                    return await _process(creator_id, idx)
+
+            # 创建任务
+            tasks = [asyncio.create_task(worker(cid, idx)) for idx, cid in enumerate(creator_ids)]
+            results = await asyncio.gather(*tasks)
+
+            return results
+
+        finally:
+            # 统一清理
+            await self._cleanup_resources(session, browser)
 
     async def get_note_detail(
             self,
@@ -434,27 +400,46 @@ class XiaohongshuConnector(BaseConnector):
     ) -> List[Dict[str, Any]]:
         """批量获取笔记详情"""
 
-        async def _process(url: str, idx: int, context: Any, session: Any):
-            logger.info(f"[xiaohongshu] Extracting detail {idx + 1}: {url}")
-            page = await context.new_page()
-            try:
-                await page.goto(url, timeout=60000)
-                await asyncio.sleep(2)
+        # 获取 session（一次创建，整个方法内复用）
+        session = await self._get_browser_session(source, source_id)
+        browser = None
 
-                data = await self._get_note_detail_evaluate(page)
-                return {
-                    "url": url,
-                    "success": bool(data),
-                    "data": data or {},
-                    "method": "evaluate_extraction"
-                }
-            finally:
-                await page.close()
+        try:
+            browser, context = await self._connect_cdp(session)
 
-        results = []
-        async for result in self._batch_execute(urls, _process, concurrency, source, source_id):
-            results.append(result)
-        return results
+            async def _process(url: str, idx: int):
+                logger.info(f"[xiaohongshu] Extracting detail {idx + 1}/{len(urls)}: {url}")
+                page = await context.new_page()
+                try:
+                    await page.goto(url, timeout=60000)
+                    await asyncio.sleep(2)
+
+                    data = await self._get_note_detail_evaluate(page)
+                    return {
+                        "url": url,
+                        "success": bool(data),
+                        "data": data or {},
+                        "method": "evaluate_extraction"
+                    }
+                finally:
+                    await page.close()
+
+            # 并发控制
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def worker(url, idx):
+                async with semaphore:
+                    return await _process(url, idx)
+
+            # 创建任务
+            tasks = [asyncio.create_task(worker(u, idx)) for idx, u in enumerate(urls)]
+            results = await asyncio.gather(*tasks)
+
+            return results
+
+        finally:
+            # 统一清理
+            await self._cleanup_resources(session, browser)
 
     async def search_and_extract(
             self,
@@ -467,30 +452,49 @@ class XiaohongshuConnector(BaseConnector):
     ) -> List[Dict[str, Any]]:
         """批量搜索"""
 
-        async def _process(keyword: str, idx: int, context: Any, session: Any):
-            logger.info(f"[xiaohongshu] Searching keyword {idx + 1}: {keyword}")
-            page = await context.new_page()
-            try:
-                url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}"
-                await page.goto(url, timeout=60000)
-                await asyncio.sleep(2)
+        # 获取 session（一次创建，整个方法内复用）
+        session = await self._get_browser_session(source, source_id)
+        browser = None
 
-                # 注入 JS 提取搜索结果
-                script = self._get_search_extract_script(user_id)
-                results = await page.evaluate(script)
+        try:
+            browser, context = await self._connect_cdp(session)
 
-                return {
-                    "keyword": keyword,
-                    "success": bool(results),
-                    "data": results or []
-                }
-            finally:
-                await page.close()
+            async def _process(keyword: str, idx: int):
+                logger.info(f"[xiaohongshu] Searching keyword {idx + 1}/{len(keywords)}: {keyword}")
+                page = await context.new_page()
+                try:
+                    url = f"https://www.xiaohongshu.com/search_result?keyword={keyword}"
+                    await page.goto(url, timeout=60000)
+                    await asyncio.sleep(2)
 
-        results = []
-        async for result in self._batch_execute(keywords, _process, concurrency, source, source_id):
-            results.append(result)
-        return results
+                    # 注入 JS 提取搜索结果
+                    script = self._get_search_extract_script(user_id)
+                    search_results = await page.evaluate(script)
+
+                    return {
+                        "keyword": keyword,
+                        "success": bool(search_results),
+                        "data": search_results or []
+                    }
+                finally:
+                    await page.close()
+
+            # 并发控制
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def worker(keyword, idx):
+                async with semaphore:
+                    return await _process(keyword, idx)
+
+            # 创建任务
+            tasks = [asyncio.create_task(worker(kw, idx)) for idx, kw in enumerate(keywords)]
+            results = await asyncio.gather(*tasks)
+
+            return results
+
+        finally:
+            # 统一清理
+            await self._cleanup_resources(session, browser)
 
     # ==================== 底层数据提取与辅助方法 (私有) ====================
 
