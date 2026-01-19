@@ -307,7 +307,6 @@ class XiaohongshuTrendAgent(BaseAgent):
             self._task.progress = 10
             await self._task.save()
 
-            # === AI Native 登录检查 ===
             # 在执行任务前，先检查平台登录状态
             from services.sniper.connectors.xiaohongshu import XiaohongshuConnector
 

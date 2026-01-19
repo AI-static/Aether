@@ -81,32 +81,19 @@ async def _retry_task(task: Task) -> str:
     task.status = TaskStatus.RUNNING
     task.progress = 0
     task.error = None
-    # 保留 result 中的 user_response，但移除 interaction
-    if task.result and "user_response" in task.result:
-        user_response = task.result["user_response"]
-        task.result = {"user_response": user_response}
-    else:
-        task.result = None
+    task.result = None
     task.started_at = None
     task.completed_at = None
     # logs 保留，作为历史记录参考
     await task.save()
 
-    # 获取 Agent 类
-    agent_id = task.task_type
-    if agent_id not in AGENT_WORKFLOW_MAPPING:
-        raise ValueError(f"不支持的 Agent/Workflow: {agent_id}")
-
-    agent_class = AGENT_WORKFLOW_MAPPING[agent_id]
-
     # 获取原参数
     original_params = task.params or {}
 
-    # 在后台执行 Agent，复用同一个 task
-    # 注意：这里需要创建一个假的 request 对象，因为 _run_agent_task 需要它
-    from unittest.mock import Mock
-    request = Mock(spec=Request)
+    # 获取 Agent 类
+    agent_class = AGENT_WORKFLOW_MAPPING[task.task_type]
 
+    # 在后台执行 Agent，复用同一个 task
     asyncio.create_task(_run_agent_task(agent_class, request, task, **original_params))
 
     logger.info(f"[Human-in-Loop] 任务已重试: {task.id}")
@@ -137,6 +124,7 @@ async def _handle_login_confirm(task: Task, interaction_info: dict, confirm_data
 
     # 自动重试任务
     try:
+        await asyncio.sleep(3)
         retry_task_id = await _retry_task(task)
     except Exception as e:
         logger.error(f"[Human-in-Loop] 重试任务失败: {e}")

@@ -16,7 +16,7 @@ from models.connectors import PlatformType
 
 class CheckLoginStatus(BaseModel):
     """搜索结果模型"""
-    has_login: bool = Field(description="是否已经登陆")
+    has_login: bool
 
 class SearchItems(BaseModel):
     """搜索结果模型"""
@@ -66,7 +66,7 @@ class DouyinConnector(BaseConnector):
         user_id: Optional[str] = None,
         source: str = "default",
         source_id: str = "default",
-        concurrency: int = 2
+        concurrency: int = 1
     ) -> List[Dict[str, Any]]:
         """批量搜索抖音视频（改进版：去掉 AI 视觉，直接解析 HTML）
 
@@ -168,7 +168,7 @@ class DouyinConnector(BaseConnector):
         urls: List[str],
         source: str = "default",
         source_id: str = "default",
-        concurrency: int = 2
+        concurrency: int = 1
     ) -> List[Dict[str, Any]]:
         """批量获取抖音视频详情（使用选择器快速提取，不使用 Agent）
 
@@ -279,7 +279,7 @@ class DouyinConnector(BaseConnector):
         limit: Optional[int] = None,
         source: str = "default",
         source_id: str = "default",
-        concurrency: int = 2
+        concurrency: int = 1
     ) -> List[Dict[str, Any]]:
         """批量抓取创作者的视频内容（改进版：去掉 AI 视觉，容易被反爬，直接解析 HTML）
 
@@ -510,20 +510,20 @@ class DouyinConnector(BaseConnector):
                 raise RuntimeError("Failed to initialize browser")
 
             # 导航到抖音登录页
-            await session.browser.agent.navigate("https://www.douyin.com")
-            await asyncio.sleep(1.5)
+            await session.browser.agent.navigate("https://www.douyin.com/user/self")
+            await asyncio.sleep(2)
 
             # 检查是否已登录
             extract_options = ExtractOptions(
-                instruction="""查看此页面，判断用户是否已经登录抖音。
-如果页面顶部有用户头像、昵称等个人信息，则 has_login 为 true，否则为 false。
-重要：只返回 JSON 格式，不要返回其他文字说明。""",
+                instruction="""查看此页面，判断用户是否已经登录抖音。如果顶部或者我的标签中有用户头像、帖子等个人信息，则说明已经登录，则has_login赋值为True，否则为False""",
                 use_vision=True,
                 schema=CheckLoginStatus
             )
-
             try:
                 success, data = await session.browser.agent.extract(extract_options)
+
+                logger.info(f"success  data---->{success} {data}")
+
                 if success and data.has_login:
                     return {
                         "success": True,

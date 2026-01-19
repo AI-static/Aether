@@ -66,32 +66,25 @@ class CreatorSniper(BaseAgent):
             self._task.progress = 10
             await self._task.save()
 
-            # === AI Native 登录检查 ===
-            # 在执行任务前，先检查平台登录状态
-            from services.sniper.connectors.xiaohongshu import XiaohongshuConnector
-
-            connector = XiaohongshuConnector(playwright=self._playwright)
-
-            # 调用公共方法检查登录状态
-            # 方法内部会自动处理 session、browser、context 的创建和清理
-            login_res = await connector.login_with_qrcode(
-                source=self._source,
-                source_id=self._source_id
-            )
-            logger.info(f"login_res --> {login_res}")
-            if not login_res.get("is_logged_in"):
-                # 未登录，暂停任务并等待用户交互
-                login_res["platform"] = "xiaohongshu"
-                await self._task.wait_for_human_input(
-                    interaction_type="login_confirm",
-                    data=login_res,
-                    resume_point="after_login"
-                )
-                logger.info(f"[xhs_creator] 任务 {self._task.id} 等待登录确认")
-                return "等待登录"
-
             # 使用 async with ConnectorService
             async with ConnectorService(self._playwright, self._source, self._source_id, self._task) as connector_service:
+                # 调用公共方法检查登录状态
+                login_res = await connector_service.login(
+                    platform=PlatformType.XIAOHONGSHU,
+                    method=LoginMethod.QRCODE
+                )
+                logger.info(f"login_res --> {login_res}")
+                if not login_res.get("is_logged_in"):
+                    # 未登录，暂停任务并等待用户交互
+                    login_res["platform"] = "xiaohongshu"
+                    await self._task.wait_for_human_input(
+                        interaction_type="login_confirm",
+                        data=login_res,
+                        resume_point="after_login"
+                    )
+                    logger.info(f"[xhs_creator] 任务 {self._task.id} 等待登录确认")
+                    return "等待登录"
+
                 # 1. 获取所有创作者的笔记列表
                 harvest_results = await connector_service.harvest_user_content(
                     platform=PlatformType.XIAOHONGSHU,

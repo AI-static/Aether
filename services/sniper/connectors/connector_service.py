@@ -403,7 +403,7 @@ class ConnectorService:
                     await self._task.cancel()
 
             # 如果任务正在运行或等待登录且发生了其他异常，将其标记为失败
-            elif self._task.status in [TaskStatus.RUNNING, TaskStatus.WAITING_LOGIN] and exc_val:
+            elif self._task.status in [TaskStatus.RUNNING, TaskStatus.WAITING_HUMAN_INPUT] and exc_val:
                 error_msg = "任务被异常终止"
                 if exc_val:
                     error_msg = f"任务被异常终止: {str(exc_val)}"

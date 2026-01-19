@@ -300,6 +300,28 @@ async function refreshTasks() {
                             <small><i class="bi bi-exclamation-triangle"></i> ${task.error}</small>
                         </div>
                     ` : ''}
+                    ${task.status === 'waiting_human_input' && task.result?.interaction?.interaction_type === 'login_confirm' ? `
+                        <div class="mt-2">
+                            <div class="alert alert-warning alert-sm mb-2">
+                                <i class="bi bi-person-circle"></i> <strong>需要登录确认</strong>
+                                <p class="mb-0 mt-1"><small>请在云浏览器中完成登录，然后点击确认按钮</small></p>
+                            </div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button class="btn btn-sm btn-primary"
+                                        onclick="openTaskLoginModal('${task.id}', '${task.result.interaction.data?.platform || 'douyin'}', '${task.result.interaction.data?.browser_url || task.result.interaction.data?.qrcode}')">
+                                    <i class="bi bi-box-arrow-in-right"></i> 打开云浏览器
+                                </button>
+                                <button class="btn btn-sm btn-success"
+                                        onclick="confirmTaskLogin('${task.id}', '${task.result.interaction.data?.platform || 'douyin'}', '${task.result.interaction.data?.context_id}')">
+                                    <i class="bi bi-check-circle"></i> 确认登录完成
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="cancelTask('${task.id}')">
+                                    <i class="bi bi-x-circle"></i> 取消
+                                </button>
+                            </div>
+                        </div>
+                    ` : ''}
                     ${task.logs && task.logs.length > 0 ? `
                         <div class="mt-2">
                             <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#logsCollapse${index}" aria-expanded="false" aria-controls="logsCollapse${index}">
@@ -995,74 +1017,74 @@ function startCookieLogin() {
 }
 
 // Submit cookie login
-async function submitCookieLogin(event) {
-    event.preventDefault();
-
-    if (!currentLoginPlatform) {
-        showToast('Error', 'Please select a platform first', 'error');
-        return;
-    }
-
-    const cookieInput = document.getElementById('cookieInput');
-    const cookies = cookieInput.value.trim();
-    const resultDiv = document.getElementById('cookieLoginResult');
-
-    if (!cookies) {
-        showToast('Error', 'Please enter cookies', 'error');
-        return;
-    }
-
-    let cookiesObj;
-    try {
-        cookiesObj = JSON.parse(cookies);
-    } catch (e) {
-        resultDiv.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="bi bi-exclamation-triangle"></i> Invalid JSON format
-            </div>
-        `;
-        return;
-    }
-
-    resultDiv.innerHTML = `
-        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-        <span class="ms-2">Logging in...</span>
-    `;
-
-    try {
-        const response = await api.post('/connectors/login', {
-            platform: currentLoginPlatform,
-            method: 'cookie',
-            cookies: cookiesObj
-        });
-
-        if (response.data?.code === 0) {
-            resultDiv.innerHTML = `
-                <div class="alert alert-success">
-                    <i class="bi bi-check-circle"></i> Login successful!
-                </div>
-            `;
-            showToast('Success', 'Login successful!', 'success');
-
-            // Refresh login status
-            setTimeout(() => {
-                checkPlatformLoginStatus(currentLoginPlatform);
-                cookieInput.value = '';
-                resultDiv.innerHTML = '';
-            }, 1000);
-        } else {
-            throw new Error(response.data?.message || 'Login failed');
-        }
-    } catch (error) {
-        console.error('Cookie login error:', error);
-        resultDiv.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="bi bi-exclamation-triangle"></i>
-                ${error.response?.data?.message || error.message || 'Login failed'}
-            </div>
-        `;
-    }
-}
+// async function submitCookieLogin(event) {
+//     event.preventDefault();
+//
+//     if (!currentLoginPlatform) {
+//         showToast('Error', 'Please select a platform first', 'error');
+//         return;
+//     }
+//
+//     const cookieInput = document.getElementById('cookieInput');
+//     const cookies = cookieInput.value.trim();
+//     const resultDiv = document.getElementById('cookieLoginResult');
+//
+//     if (!cookies) {
+//         showToast('Error', 'Please enter cookies', 'error');
+//         return;
+//     }
+//
+//     let cookiesObj;
+//     try {
+//         cookiesObj = JSON.parse(cookies);
+//     } catch (e) {
+//         resultDiv.innerHTML = `
+//             <div class="alert alert-danger">
+//                 <i class="bi bi-exclamation-triangle"></i> Invalid JSON format
+//             </div>
+//         `;
+//         return;
+//     }
+//
+//     resultDiv.innerHTML = `
+//         <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+//         <span class="ms-2">Logging in...</span>
+//     `;
+//
+//     try {
+//         const response = await api.post('/connectors/login', {
+//             platform: currentLoginPlatform,
+//             method: 'cookie',
+//             cookies: cookiesObj
+//         });
+//
+//         if (response.data?.code === 0) {
+//             resultDiv.innerHTML = `
+//                 <div class="alert alert-success">
+//                     <i class="bi bi-check-circle"></i> Login successful!
+//                 </div>
+//             `;
+//             showToast('Success', 'Login successful!', 'success');
+//
+//             // Refresh login status
+//             setTimeout(() => {
+//                 checkPlatformLoginStatus(currentLoginPlatform);
+//                 cookieInput.value = '';
+//                 resultDiv.innerHTML = '';
+//             }, 1000);
+//         } else {
+//             throw new Error(response.data?.message || 'Login failed');
+//         }
+//     } catch (error) {
+//         console.error('Cookie login error:', error);
+//         resultDiv.innerHTML = `
+//             <div class="alert alert-danger">
+//                 <i class="bi bi-exclamation-triangle"></i>
+//                 ${error.response?.data?.message || error.message || 'Login failed'}
+//             </div>
+//         `;
+//     }
+// }
 
 // Start polling for login status
 function startLoginStatusPolling() {
@@ -1086,48 +1108,85 @@ function startLoginStatusPolling() {
 }
 
 // Check platform login status
-async function checkPlatformLoginStatus(platform, isPolling = false) {
-    const statusBadge = document.getElementById(`status-badge-${platform}`);
-    const loginStatusDiv = document.getElementById('loginStatus');
+// async function checkPlatformLoginStatus(platform, isPolling = false) {
+//     const statusBadge = document.getElementById(`status-badge-${platform}`);
+//     const loginStatusDiv = document.getElementById('loginStatus');
+//
+//     if (!statusBadge && !isPolling) return;
+//
+//     try {
+//         const response = await api.get(`/connectors/context/${platform}`);
+//         const isLoggedIn = response.data?.data?.exists || false;
+//
+//         if (isLoggedIn) {
+//             if (statusBadge) {
+//                 statusBadge.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Logged In</span>';
+//             }
+//
+//             if (isPolling && loginStatusDiv) {
+//                 loginStatusDiv.innerHTML = `
+//                     <div class="alert alert-success">
+//                         <i class="bi bi-check-circle"></i> Login successful!
+//                     </div>
+//                 `;
+//                 showToast('Success', 'Login successful!', 'success');
+//
+//                 // Stop polling
+//                 if (loginCheckInterval) {
+//                     clearInterval(loginCheckInterval);
+//                     loginCheckInterval = null;
+//                 }
+//
+//                 // Hide QR code card after 2 seconds
+//                 setTimeout(() => {
+//                     document.getElementById('qrCodeCard').classList.add('hidden');
+//                 }, 2000);
+//             }
+//         } else {
+//             if (statusBadge) {
+//                 statusBadge.innerHTML = '<span class="badge bg-secondary"><i class="bi bi-x-circle"></i> Not Logged In</span>';
+//             }
+//         }
+//     } catch (error) {
+//         if (statusBadge) {
+//             statusBadge.innerHTML = '<span class="badge bg-secondary"><i class="bi bi-x-circle"></i> Not Logged In</span>';
+//         }
+//     }
+// }
 
-    if (!statusBadge && !isPolling) return;
-
-    try {
-        const response = await api.get(`/connectors/context/${platform}`);
-        const isLoggedIn = response.data?.data?.exists || false;
-
-        if (isLoggedIn) {
-            if (statusBadge) {
-                statusBadge.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Logged In</span>';
-            }
-
-            if (isPolling && loginStatusDiv) {
-                loginStatusDiv.innerHTML = `
-                    <div class="alert alert-success">
-                        <i class="bi bi-check-circle"></i> Login successful!
-                    </div>
-                `;
-                showToast('Success', 'Login successful!', 'success');
-
-                // Stop polling
-                if (loginCheckInterval) {
-                    clearInterval(loginCheckInterval);
-                    loginCheckInterval = null;
-                }
-
-                // Hide QR code card after 2 seconds
-                setTimeout(() => {
-                    document.getElementById('qrCodeCard').classList.add('hidden');
-                }, 2000);
-            }
-        } else {
-            if (statusBadge) {
-                statusBadge.innerHTML = '<span class="badge bg-secondary"><i class="bi bi-x-circle"></i> Not Logged In</span>';
-            }
-        }
-    } catch (error) {
-        if (statusBadge) {
-            statusBadge.innerHTML = '<span class="badge bg-secondary"><i class="bi bi-x-circle"></i> Not Logged In</span>';
-        }
+// 打开任务登录模态框
+async function openTaskLoginModal(taskId, platform, browserUrl) {
+    if (browserUrl) {
+        window.open(browserUrl, '_blank');
+        showToast('Info', '云浏览器已打开，请在浏览器中完成登录', 'info');
+    } else {
+        showToast('Error', '无法打开云浏览器', 'error');
     }
 }
+
+// 确认任务登录完成
+async function confirmTaskLogin(taskId, platform, contextId) {
+    if (!contextId) {
+        showToast('Error', '缺少上下文ID', 'error');
+        return;
+    }
+
+    try {
+        // 调用后端API确认登录
+        const response = await api.post(`/connectors/login/${platform}/confirm`, {
+            context_id: contextId
+        });
+
+        if (response.data?.code === 0) {
+            showToast('Success', '登录确认成功！任务将继续执行', 'success');
+            // 刷新任务列表
+            setTimeout(() => refreshTasks(), 1000);
+        } else {
+            throw new Error(response.data?.message || '登录确认失败');
+        }
+    } catch (error) {
+        console.error('确认登录失败:', error);
+        showToast('Error', error.response?.data?.message || error.message || '确认登录失败', 'error');
+    }
+}
+

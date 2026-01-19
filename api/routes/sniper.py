@@ -357,11 +357,10 @@ async def retry_task(request: Request, task_id: str):
             ).model_dump(), status=404)
 
         # 获取 Agent 类
-        agent_id = task.task_type
-        if agent_id not in AGENT_WORKFLOW_MAPPING:
+        if task.task_type not in AGENT_WORKFLOW_MAPPING:
             return json(BaseResponse(
                 code=ErrorCode.INTERNAL_ERROR,
-                message=f"不支持的 Agent/Workflow: {agent_id}",
+                message=f"不支持的 Agent/Workflow: {task.task_type}",
                 data=None
             ).model_dump(), status=400)
 
@@ -379,7 +378,7 @@ async def retry_task(request: Request, task_id: str):
         original_params = task.params or {}
 
         # 获取 Agent 类
-        agent_class = AGENT_WORKFLOW_MAPPING[agent_id]
+        agent_class = AGENT_WORKFLOW_MAPPING[task.task_type]
 
         # 在后台执行 Agent，复用同一个 task
         asyncio.create_task(_run_agent_task(agent_class, request, task, **original_params))
@@ -389,8 +388,7 @@ async def retry_task(request: Request, task_id: str):
             message="任务已重新开始",
             data={
                 "task_id": str(task.id),
-                "agent_or_workflow": agent_id,
-                "message": f"{agent_id} 任务已重新开始执行"
+                "message": f"{task.task_type} 任务已重新开始执行"
             }
         ).model_dump())
     except Exception as e:
@@ -427,7 +425,7 @@ async def cancel_task(request: Request, task_id: str):
             ).model_dump(), status=404)
 
         # 检查任务状态
-        if task.status not in [TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.WAITING_LOGIN]:
+        if task.status not in [TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.WAITING_HUMAN_INPUT]:
             return json(BaseResponse(
                 code=ErrorCode.INTERNAL_ERROR,
                 message=f"任务状态为 {task.status}，无法取消",

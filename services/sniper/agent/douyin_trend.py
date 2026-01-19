@@ -15,8 +15,8 @@ from agno.db.postgres import AsyncPostgresDb
 from services.sniper.connectors import ConnectorService
 from services.sniper.agent.base_agent import BaseAgent
 from models.task import Task
+from models.connectors import PlatformType, LoginMethod
 from utils.logger import logger
-from models.connectors import PlatformType
 
 # 1. 数据库连接
 db = AsyncPostgresDb(
@@ -100,49 +100,40 @@ class DouyinDeepAgent(BaseAgent):
             self._task.progress = 10
             await self._task.save()
 
-            # === AI Native 登录检查 ===
-            # 在执行任务前，先检查平台登录状态
-            from services.sniper.connectors.douyin import DouyinConnector
-
-            connector = DouyinConnector(playwright=self._playwright)
-
-            # 调用公共方法检查登录状态
-            # 方法内部会自动处理 session、browser、context 的创建和清理
-            login_res = await connector.login_with_qrcode(
-                source=self._source,
-                source_id=self._source_id
-            )
-            logger.info(f"douyin login_res --> {login_res}")
-
-            # 检查登录状态：如果返回中包含 success=True 且没有 is_logged_in 字段或 is_logged_in=True，说明已登录
-            # 如果 is_logged_in=False 或返回了 qrcode，说明需要等待用户扫码
-            is_logged_in = login_res.get("is_logged_in", True)  # 默认为 True 保持向后兼容
-            if login_res.get("message") == "Has Logining":
-                is_logged_in = True
-
-            if not is_logged_in:
-                # 未登录，暂停任务并等待用户交互
-                login_res["platform"] = "douyin"
-                await self._task.wait_for_human_input(
-                    interaction_type="login_confirm",
-                    data=login_res,
-                    resume_point="after_login"
-                )
-                logger.info(f"[douyin_trend] 任务 {self._task.id} 等待登录确认")
-                return "等待登录"
-
-            # Step 1: 关键词裂变
-            search_keywords = await self._generate_keywords(keywords)
-            await self._task.log_step(1, "关键词裂变",
-                              {"core_keyword": keywords},
-                              {"keywords": search_keywords})
-            self._task.progress = 25
-            await self._task.save()
-
             # 使用 ConnectorService 搜索和分析
             async with ConnectorService(self._playwright, self._source, self._source_id, self._task) as connector_service:
+                login_res = await connector_service.login(
+                    platform=PlatformType.DOUYIN,
+                    method=LoginMethod.QRCODE
+                )
+                logger.info(f"douyin login_res --> {login_res}")
+
+                # 检查登录状态：如果返回中包含 success=True 且没有 is_logged_in 字段或 is_logged_in=True，说明已登录
+                # 如果 is_logged_in=False 或返回了 qrcode，说明需要等待用户扫码
+                is_logged_in = login_res.get("is_logged_in", True)  # 默认为 True 保持向后兼容
+                if login_res.get("message") == "Has Logining":
+                    is_logged_in = True
+
+                if not is_logged_in:
+                    # 未登录，暂停任务并等待用户交互
+                    login_res["platform"] = "douyin"
+                    await self._task.wait_for_human_input(
+                        interaction_type="login_confirm",
+                        data=login_res,
+                        resume_point="after_login"
+                    )
+                    logger.info(f"[douyin_trend] 任务 {self._task.id} 等待登录确认")
+                    return "等待登录"
+
+                # Step 1: 关键词裂变
+                search_keywords = await self._generate_keywords(keywords)
+                await self._task.log_step(1, "关键词裂变",
+                                          {"core_keyword": keywords},
+                                          {"keywords": search_keywords})
+                self._task.progress = 25
+                await self._task.save()
+
                 # Step 2: 搜索抖音视频
-                from models.connectors import PlatformType
 
                 logger.info(f"[douyin] 开始搜索关键词: {search_keywords}")
                 search_results = await connector_service.search_and_extract(
