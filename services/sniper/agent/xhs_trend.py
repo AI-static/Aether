@@ -321,9 +321,14 @@ class XiaohongshuTrendAgent(BaseAgent):
             )
             logger.info(f"login_res --> {login_res}")
             if not login_res.get("is_logged_in"):
-                # 未登录，暂停任务并保存登录信息
-                await self._task.waiting_login(login_res)
-                logger.info(f"[xhs_trend] 任务 {task.id} 等待登录")
+                # 未登录，暂停任务并等待用户交互
+                login_res["platform"] = "xiaohongshu"
+                await self._task.wait_for_human_input(
+                    interaction_type="login_confirm",
+                    data=login_res,
+                    resume_point="after_login"
+                )
+                logger.info(f"[xhs_trend] 任务 {self._task.id} 等待登录确认")
                 return "等待登录"
 
             # Step 1: 关键词裂变
@@ -519,7 +524,7 @@ async def main():
                 source_id=source_id,
                 task_type="trend_analysis"
             )
-            await self._task.start()
+            await task.start()
 
             keywords = ["SKG", "健康穿戴", "按摩仪"]
             keywords = ["后端开发", "Agent"]

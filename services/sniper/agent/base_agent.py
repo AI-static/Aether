@@ -62,6 +62,77 @@ class BaseAgent(ABC):
 
         logger.info(f"[Agent] Cleanup completed for task {self._task.id if self._task else 'unknown'}")
 
+    async def _wait_for_login_confirmation(self, context_id: str, timeout: int = 120):
+        """等待用户确认登录
+
+        用户在前端点击"我已登录"后，会通过 Redis Pub/Sub 发送消息
+        收到消息后，继续执行任务
+
+        Args:
+            context_id: AgentBay context ID
+            timeout: 超时时间（秒）
+
+        使用场景：
+            Agent 检测到未登录时，调用此方法等待用户确认登录
+            用户扫码并点击"我已登录"后，Agent 继续执行后续逻辑
+        """
+        import asyncio
+        from utils.cache import get_redis
+
+        logger.info(f"[Agent] 等待用户确认登录，context_id: {context_id}")
+
+        pubsub = None
+        confirm_channel = f"login_confirm:{context_id}"
+
+        try:
+            # 创建登录确认事件
+            confirm_event = asyncio.Event()
+
+            # 订阅登录确认频道
+            redis = await get_redis()
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(confirm_channel)
+
+            logger.info(f"[Agent] 已订阅登录确认频道: {confirm_channel}")
+
+            # 监听登录确认消息
+            async def listen_confirm():
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        logger.info(f"[Agent] 收到登录确认消息，context_id: {context_id}")
+                        confirm_event.set()
+                        break
+
+            # 启动监听任务
+            listen_task = asyncio.create_task(listen_confirm())
+
+            # 等待确认或超时
+            try:
+                await asyncio.wait_for(confirm_event.wait(), timeout=timeout)
+                logger.info(f"[Agent] 用户已确认登录，继续执行任务")
+            except asyncio.TimeoutError:
+                logger.warning(f"[Agent] 登录确认超时 ({timeout}s)，继续执行任务")
+
+            finally:
+                listen_task.cancel()
+                try:
+                    await listen_task
+                except asyncio.CancelledError:
+                    pass
+
+        except Exception as e:
+            logger.error(f"[Agent] 等待登录确认时出错: {e}")
+
+        finally:
+            # 清理 Pub/Sub 连接
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe(confirm_channel)
+                    await pubsub.close()
+                    logger.debug(f"[Agent] Pub/Sub 连接已关闭")
+                except Exception as e:
+                    logger.error(f"[Agent] 关闭 Pub/Sub 连接时出错: {e}")
+
     @abstractmethod
     async def execute(self, **kwargs) -> Dict[str, Any]:
         """执行 Agent 任务（子类必须实现）

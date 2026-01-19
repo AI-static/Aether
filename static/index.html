@@ -89,6 +89,7 @@
             grid-template-columns: 320px 1fr;  /* 两列布局：Agents Sidebar | Tasks+Console */
             grid-template-rows: 60px 1fr;
             height: 100vh;
+            height: 100dvh;  /* 使用动态视口高度，适配开发者工具 */
             overflow: hidden;
         }
 
@@ -1467,7 +1468,7 @@
         }
 
         /* ========== RESPONSIVE ========== */
-        @media (max-width: 1200px) {
+        @media (max-width: 900px) {
             .app-container {
                 grid-template-columns: 80px 1fr;
             }
@@ -1796,7 +1797,8 @@
             // 跟踪每个任务的日志计数，避免重复日志
             const taskState = {
                 lastLogCount: 0,
-                lastLoggedProgress: 0
+                lastLoggedProgress: 0,
+                lastStatus: null  // 跟踪状态变化
             };
 
             state.pollIntervals[taskId] = setInterval(async () => {
@@ -1828,57 +1830,75 @@
                     }
                 }
 
-                // Fetch task logs (仅在选中时显示)
-                if (isSelected) {
-                    const logs = await fetchTaskLogs(taskId);
+                // 只在选中时处理 UI 更新
+                if (isSelected && taskData) {
+                    // 检查状态是否发生了重大变化（需要完全重新渲染）
+                    const statusChanged = taskState.lastStatus !== null && taskState.lastStatus !== taskData.status;
+                    const needsFullRender = statusChanged ||
+                                          taskData.status === 'waiting_human_input' ||
+                                          (taskData.status === 'completed' && taskData.result) ||
+                                          (taskData.status === 'failed' && taskData.error);
 
-                    // Display new logs
-                    if (logs && logs.length > taskState.lastLogCount) {
-                        const newLogs = logs.slice(taskState.lastLogCount);
-                        newLogs.forEach(log => {
-                            const logType = log.level === 'ERROR' ? 'error' :
-                                         log.level === 'SUCCESS' ? 'success' :
-                                         log.level === 'WARNING' ? 'warning' : 'info';
-                            addConsoleLog(logType, log.message || JSON.stringify(log));
-                        });
-                        taskState.lastLogCount = logs.length;
+                    // 如果状态变化到 waiting_human_input，完全重新渲染
+                    if (statusChanged && taskData.status === 'waiting_human_input') {
+                        // 重新选中任务以触发完全重新渲染
+                        const currentTask = getTaskById(taskId);
+                        if (currentTask) {
+                            selectTask(taskId); // 这会清空 console 并重新渲染所有内容
+                            taskState.lastStatus = taskData.status;
+                            return;
+                        }
                     }
 
-                    // Check task status and stop polling if completed/failed
-                    if (taskData) {
-                        if (taskData.status === 'completed') {
-                            addConsoleLog('success', '✓ Task completed successfully!');
-                            // 刷新任务列表以显示最新状态
-                            if (taskUpdated) {
-                                renderTaskList();
-                            }
-                            // 渲染任务结果
-                            if (taskData.result) {
-                                renderTaskResult(taskData.result);
-                            }
-
+                    // 如果状态变化到 completed 或 failed，也完全重新渲染
+                    if (statusChanged && (taskData.status === 'completed' || taskData.status === 'failed')) {
+                        const currentTask = getTaskById(taskId);
+                        if (currentTask) {
+                            selectTask(taskId);
                             stopTaskPolling(taskId);
-                            return; // Stop execution
-                        } else if (taskData.status === 'failed') {
-                            addConsoleLog('error', `✗ Task failed: ${taskData.error || 'Unknown error'}`);
-                            // 刷新任务列表以显示最新状态
-                            if (taskUpdated) {
-                                renderTaskList();
-                            }
+                            return;
+                        }
+                    }
 
-                            stopTaskPolling(taskId);
-                            return; // Stop execution
-                        } else if (taskData.status === 'running') {
-                            if (taskData.progress !== undefined) {
-                                // Only log progress if it changed significantly (every 10%)
-                                const progress = Math.round(taskData.progress);
-                                if (progress - taskState.lastLoggedProgress >= 10) {
-                                    addConsoleLog('info', `Progress: ${progress}%`);
-                                    taskState.lastLoggedProgress = progress;
-                                }
+                    // Fetch task logs (仅当不是需要完全重新渲染的情况)
+                    if (!needsFullRender) {
+                        const logs = await fetchTaskLogs(taskId);
+
+                        // Display new logs
+                        if (logs && logs.length > taskState.lastLogCount) {
+                            const newLogs = logs.slice(taskState.lastLogCount);
+                            newLogs.forEach(log => {
+                                const logType = log.level === 'ERROR' ? 'error' :
+                                             log.level === 'SUCCESS' ? 'success' :
+                                             log.level === 'WARNING' ? 'warning' : 'info';
+                                addConsoleLog(logType, log.message || JSON.stringify(log));
+                            });
+                            taskState.lastLogCount = logs.length;
+                        }
+                    }
+
+                    // Check task status and handle accordingly
+                    if (taskData.status === 'completed') {
+                        // 已经在上面处理了，这里只需要停止轮询
+                        stopTaskPolling(taskId);
+                        return;
+                    } else if (taskData.status === 'failed') {
+                        // 已经在上面处理了，这里只需要停止轮询
+                        stopTaskPolling(taskId);
+                        return;
+                    } else if (taskData.status === 'running') {
+                        if (taskData.progress !== undefined) {
+                            // Only log progress if it changed significantly (every 10%)
+                            const progress = Math.round(taskData.progress);
+                            if (progress - taskState.lastLoggedProgress >= 10) {
+                                addConsoleLog('info', `Progress: ${progress}%`);
+                                taskState.lastLoggedProgress = progress;
                             }
                         }
                     }
+
+                    // 更新最后的状态
+                    taskState.lastStatus = taskData.status;
                 }
             }, POLLING_CONFIG.TASK_STATUS_INTERVAL);
         }
@@ -2471,6 +2491,73 @@
             renderTaskList();
         }
 
+        // 检查并渲染登录按钮（统一的函数）
+        function renderLoginButtonIfNeeded(task, taskId) {
+            // 检查任务日志中是否有登录步骤
+            let loginInfo = null;
+
+            // 优先从日志中查找
+            if (task.logs && task.logs.length > 0) {
+                const loginLog = task.logs.find(log =>
+                    (log.name === '等待用户登录' || log.name === '等待登录') &&
+                    log.output &&
+                    typeof log.output === 'object' &&
+                    (log.output.browser_url || log.output.qrcode)
+                );
+                if (loginLog) {
+                    loginInfo = loginLog.output;
+                }
+            }
+
+            // 如果日志中没有，检查 result
+            if (!loginInfo && task.result && (task.result.browser_url || task.result.qrcode)) {
+                loginInfo = task.result;
+            }
+
+            // 如果找到了登录信息，渲染登录按钮
+            if (loginInfo) {
+                const browserUrl = loginInfo.browser_url || loginInfo.qrcode;
+                const contextId = loginInfo.context_id;
+                const platform = loginInfo.platform || 'xiaohongshu'; // 支持动态平台
+
+                if (browserUrl) {
+                    const loginButtonsHtml = `
+                        <div class="console-login-card" data-task-id="${taskId}" data-context-id="${contextId}" data-platform="${platform}">
+                            <div class="login-card-header">
+                                <i class="fas fa-cloud"></i>
+                                <span>请在云浏览器中完成登录</span>
+                            </div>
+                            <div class="login-card-body">
+                                <p>请按以下步骤完成登录：</p>
+                                <ol>
+                                    <li>点击"打开登录页面"按钮</li>
+                                    <li>在打开的浏览器窗口中完成登录</li>
+                                    <li>登录成功后，返回此页面点击"我已登录"按钮</li>
+                                </ol>
+                                <div class="login-actions">
+                                    <a href="${browserUrl}" target="_blank" class="console-btn console-btn-primary">
+                                        <i class="fas fa-external-link-alt"></i>
+                                        打开登录页面
+                                    </a>
+                                    <button onclick="confirmInteraction('${taskId}', 'login_confirm', true, {context_id: '${contextId}', platform: '${platform}'})"
+                                            class="console-btn console-btn-primary">
+                                        <i class="fas fa-check"></i>
+                                        我已登录
+                                    </button>
+                                </div>
+                                <div class="console-login-prompt">
+                                    <i class="fas fa-lightbulb" style="color: #fbbf24;"></i> 提示：请确保在新窗口中完成登录后再确认
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    addConsoleLog('info', loginButtonsHtml, { html: true });
+                    return true; // 表示已渲染登录按钮
+                }
+            }
+            return false; // 表示没有渲染登录按钮
+        }
+
         async function selectTask(taskId) {
             state.selectedTaskId = taskId;
 
@@ -2501,11 +2588,12 @@
                     // 显示步骤信息
                     addConsoleLog(logType, message);
 
-                    // 如果有输入/输出，也显示
+                    // 如果有输入/输出，也显示（但不渲染登录按钮，统一在后面处理）
                     if (log.input) {
                         addConsoleLog('info', `  输入: ${JSON.stringify(log.input).slice(0, 100)}...`);
                     }
-                    if (log.output) {
+                    if (log.output && log.name !== '等待用户登录' && log.name !== '等待登录') {
+                        // 非登录步骤的输出正常显示
                         const outputStr = typeof log.output === 'string' ? log.output : JSON.stringify(log.output);
                         addConsoleLog('info', `  输出: ${outputStr.slice(0, 150)}...`);
                     }
@@ -2516,6 +2604,11 @@
             if (task.status === 'running') {
                 addConsoleLog('info', '⏳ 任务正在执行中...');
                 startTaskPolling(taskId);
+            } else if (task.status === 'waiting_human_input' || task.status === 'waiting_login') {
+                // 等待人类输入状态（兼容旧状态）
+                addConsoleLog('warning', '⏳ 任务等待用户输入...');
+                // 统一渲染登录按钮
+                renderLoginButtonIfNeeded(task, taskId);
             } else if (task.status === 'completed') {
                 // 显示任务结果（在日志之后）
                 if (task.result) {
@@ -2702,6 +2795,57 @@
             } catch (error) {
                 alert(`取消失败: ${error.message}`);
             }
+        }
+
+        async function confirmInteraction(taskId, interactionType, confirmed, responseData = null, comment = null) {
+            // 通用的人类交互确认
+            try {
+                addConsoleLog('info', `⏳ 正在处理${getInteractionTypeName(interactionType)}...`);
+
+                const response = await apiCall(`/interactions/${taskId}/confirm`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        interaction_id: taskId,
+                        confirmed: confirmed,
+                        response_data: responseData,
+                        comment: comment
+                    })
+                });
+
+                if (response.code === 0) {
+                    const action = confirmed ? '确认' : '拒绝';
+                    addConsoleLog('success', `✓ ${getInteractionTypeName(interactionType)}已${action}！${response.message || ''}`);
+
+                    // 刷新任务列表
+                    await fetchAgentTasks(state.selectedAgentId);
+                    renderTaskList();
+
+                    // 重新选中任务以刷新状态
+                    const task = getTaskById(taskId);
+                    if (task && (task.status === 'waiting_login' || task.status === 'waiting_human_input')) {
+                        selectTask(taskId);
+                    }
+                } else {
+                    addConsoleLog('error', `✗ 处理失败: ${response.message || '未知错误'}`);
+                    alert(`处理失败: ${response.message || '未知错误'}`);
+                }
+            } catch (error) {
+                addConsoleLog('error', `✗ 处理失败: ${error.message}`);
+                alert(`处理失败: ${error.message}`);
+            }
+        }
+
+        // 获取交互类型的显示名称
+        function getInteractionTypeName(type) {
+            const names = {
+                'login_confirm': '登录确认',
+                'content_review': '内容审核',
+                'image_select': '图片选择',
+                'text_edit': '文本编辑',
+                'choice_select': '选项选择',
+                'custom_approval': '自定义审批'
+            };
+            return names[type] || '交互';
         }
 
         function showQuickRunMenu() {

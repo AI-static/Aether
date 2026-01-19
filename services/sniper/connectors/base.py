@@ -168,35 +168,6 @@ class BaseConnector(ABC):
 
             logger.debug(f"[{self.platform_name_str}] Session context cleanup completed")
 
-    async def _wait_and_cleanup_after_scan(
-            self,
-            session: Any,
-            browser: Any,
-            context_key: str,
-            timeout: int = 60,
-    ):
-        """后台任务：等待60秒后优雅关闭并落盘上下文"""
-        logger.info(f"[Connector] Background task: waiting {timeout}s before cleanup")
-
-        try:
-            # 直接等待指定秒数，让用户扫码并让页面完全稳定
-            await asyncio.sleep(timeout)
-
-            logger.info(f"[Connector] Saving context and cleaning up: {context_key}")
-
-            # 优雅关闭浏览器，自动同步 cookies 到 context
-            await self._cleanup_resources(session, browser)
-            logger.info(f"[Connector] Context saved successfully")
-
-        except Exception as e:
-            logger.error(f"[Connector] Background task error: {e}")
-            await self._cleanup_resources(session, browser)
-        finally:
-            # 清理 _login_tasks 中的记录
-            if context_key in self._login_tasks:
-                logger.info(f"[Connector] Cleaning up _login_tasks entry: {context_key}")
-                del self._login_tasks[context_key]
-
     async def cleanup_resources(self, session, browser):
         """统一清理资源"""
 
@@ -212,6 +183,100 @@ class BaseConnector(ABC):
                 await self.agent_bay.delete(session, sync_context=True)
         except Exception:
             pass
+
+    async def _monitor_and_cleanup(
+        self,
+        session,
+        context_id: str,
+        timeout: int = 120
+    ):
+        """后台任务：监听登录确认 → 落盘 cookies → 清理资源
+
+        工作流程：
+        1. 订阅 Redis Pub/Sub 频道：login_confirm:{context_id}
+        2. 用户点击"我已登录"后，收到消息
+        3. 调用 agent_bay.delete(session, sync_context=True) 落盘 cookies
+        4. 清理 session 资源
+
+        Args:
+            session: AgentBay session 对象
+            context_id: AgentBay context ID
+            timeout: 超时时间（秒），超时后自动清理（不落盘）
+        """
+        from utils.cache import get_redis
+
+        logger.info(f"[{self.platform_name_str}] 后台任务：监听登录确认，context_id: {context_id}")
+
+        pubsub = None
+        confirm_channel = f"login_confirm:{context_id}"
+
+        try:
+            # 创建登录确认事件
+            confirm_event = asyncio.Event()
+
+            # 订阅登录确认频道
+            redis = await get_redis()
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(confirm_channel)
+
+            logger.info(f"[{self.platform_name_str}] 已订阅登录确认频道: {confirm_channel}")
+
+            # 监听登录确认消息
+            async def listen_confirm():
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        logger.info(f"[{self.platform_name_str}] 收到登录确认消息，context_id: {context_id}")
+                        confirm_event.set()
+                        break
+
+            # 启动监听任务
+            listen_task = asyncio.create_task(listen_confirm())
+
+            # 等待确认或超时
+            try:
+                await asyncio.wait_for(confirm_event.wait(), timeout=timeout)
+                logger.info(f"[{self.platform_name_str}] ✅ 用户已确认登录，开始落盘 cookies")
+
+                # 🔥 关键：落盘 cookies
+                await self.agent_bay.delete(session, sync_context=True)
+                logger.info(f"[{self.platform_name_str}] ✅ Cookies 已落盘到 context: {context_id}")
+
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.platform_name_str}] ⏰ 登录确认超时 ({timeout}s)，清理资源（不落盘）")
+                await self.agent_bay.delete(session, sync_context=False)
+
+            finally:
+                listen_task.cancel()
+                try:
+                    await listen_task
+                except asyncio.CancelledError:
+                    pass
+
+        except asyncio.CancelledError:
+            logger.info(f"[{self.platform_name_str}] 后台任务被取消")
+            # 取消时也尝试落盘（可能已经登录了）
+            try:
+                await self.agent_bay.delete(session, sync_context=True)
+            except Exception as e:
+                logger.error(f"[{self.platform_name_str}] 取消时落盘失败: {e}")
+
+        except Exception as e:
+            logger.error(f"[{self.platform_name_str}] 后台任务异常: {e}")
+            # 异常时也尝试清理资源
+            try:
+                await self.agent_bay.delete(session, sync_context=False)
+            except Exception:
+                pass
+
+        finally:
+            # 清理 Pub/Sub 连接
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe(confirm_channel)
+                    await pubsub.close()
+                    logger.debug(f"[{self.platform_name_str}] Pub/Sub 连接已关闭")
+                except Exception as e:
+                    logger.error(f"[{self.platform_name_str}] 关闭 Pub/Sub 连接时出错: {e}")
 
     async def take_and_save_screenshot(
         self,

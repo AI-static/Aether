@@ -100,6 +100,37 @@ class DouyinDeepAgent(BaseAgent):
             self._task.progress = 10
             await self._task.save()
 
+            # === AI Native 登录检查 ===
+            # 在执行任务前，先检查平台登录状态
+            from services.sniper.connectors.douyin import DouyinConnector
+
+            connector = DouyinConnector(playwright=self._playwright)
+
+            # 调用公共方法检查登录状态
+            # 方法内部会自动处理 session、browser、context 的创建和清理
+            login_res = await connector.login_with_qrcode(
+                source=self._source,
+                source_id=self._source_id
+            )
+            logger.info(f"douyin login_res --> {login_res}")
+
+            # 检查登录状态：如果返回中包含 success=True 且没有 is_logged_in 字段或 is_logged_in=True，说明已登录
+            # 如果 is_logged_in=False 或返回了 qrcode，说明需要等待用户扫码
+            is_logged_in = login_res.get("is_logged_in", True)  # 默认为 True 保持向后兼容
+            if login_res.get("message") == "Has Logining":
+                is_logged_in = True
+
+            if not is_logged_in:
+                # 未登录，暂停任务并等待用户交互
+                login_res["platform"] = "douyin"
+                await self._task.wait_for_human_input(
+                    interaction_type="login_confirm",
+                    data=login_res,
+                    resume_point="after_login"
+                )
+                logger.info(f"[douyin_trend] 任务 {self._task.id} 等待登录确认")
+                return "等待登录"
+
             # Step 1: 关键词裂变
             search_keywords = await self._generate_keywords(keywords)
             await self._task.log_step(1, "关键词裂变",

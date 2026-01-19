@@ -85,11 +85,13 @@ def register_routes(app: Sanic):
     from api.routes.connectors import connectors_bp
     from api.routes.callback import callback_bp
     from api.routes.sniper import sniper_bp
+    from api.routes.human_interaction import human_interaction_bp
     app.blueprint(image_bp)
     app.blueprint(identity_bp)
     app.blueprint(connectors_bp)
     app.blueprint(callback_bp)
     app.blueprint(sniper_bp)
+    app.blueprint(human_interaction_bp)
 
 
 def setup_database(app: Sanic):

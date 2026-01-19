@@ -15,7 +15,7 @@ class TaskStatus(str, Enum):
     """任务状态枚举"""
     PENDING = "pending"
     RUNNING = "running"
-    WAITING_LOGIN = "waiting_login"  # 等待用户登录平台
+    WAITING_HUMAN_INPUT = "waiting_human_input"  # 等待人类输入（通用）
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -71,12 +71,65 @@ class Task(Model):
         self.started_at = datetime.now()
         await self.save()
 
-    async def waiting_login(self, login_info: dict = None):
-        """标记任务等待登录"""
-        self.status = TaskStatus.WAITING_LOGIN
-        if login_info:
-            self.result = {"login_required": True, **login_info}
+
+    async def wait_for_human_input(
+        self,
+        interaction_type: str,
+        data: dict,
+        resume_point: str = None,
+        timeout_seconds: int = 120,
+        step: int = None
+    ):
+        """通用的人类交互等待方法
+
+        Args:
+            interaction_type: 交互类型（login_confirm, content_review, image_select 等）
+            data: 交互数据（会传递给前端渲染）
+            resume_point: 恢复点标识（任务重试时从这里继续）
+            timeout_seconds: 超时时间（秒）
+            step: 当前步骤编号（用于日志记录）
+        """
+        from models.interactions import HumanInteraction, InteractionType
+
+        self.status = TaskStatus.WAITING_HUMAN_INPUT
+
+        # 创建交互信息
+        interaction = HumanInteraction(
+            interaction_type=InteractionType(interaction_type),
+            task_id=str(self.id),
+            task_step=step or len(self.logs),
+            data=data,
+            timeout_seconds=timeout_seconds,
+            resume_point=resume_point
+        )
+
+        # 保存交互信息到 result
+        self.result = {
+            "human_interaction_required": True,
+            "interaction": interaction.model_dump(),
+            "interaction_type": interaction_type
+        }
+
+        # 记录日志
+        step_name = {
+            "login_confirm": "等待登录确认",
+            "content_review": "等待内容审核",
+            "image_select": "等待图片选择",
+            "text_edit": "等待文本编辑",
+            "choice_select": "等待选项选择",
+            "custom_approval": "等待自定义审批"
+        }.get(interaction_type, f"等待人类交互: {interaction_type}")
+
+        await self.log_step(
+            step=step or len(self.logs),
+            name=step_name,
+            input_data={"interaction_type": interaction_type},
+            output_data=data,
+            status="pending"
+        )
+
         await self.save()
+        return interaction
 
     async def complete(self, result_data: dict = None):
         """完成任务并上传结果到OSS"""
@@ -212,8 +265,12 @@ class Task(Model):
         elif self.status == TaskStatus.RUNNING:
             completed_steps = len([l for l in self.logs if l.get('status') == 'completed'])
             return f"任务执行中，已完成 {completed_steps} 个步骤，当前进度 {self.progress}%"
-        elif self.status == TaskStatus.WAITING_LOGIN:
-            return "任务等待登录，请在平台完成登录后继续"
+        elif self.status == TaskStatus.WAITING_HUMAN_INPUT:
+            # 从 result 中获取交互类型
+            if isinstance(self.result, dict):
+                interaction_type = self.result.get("interaction_type", "unknown")
+                return f"任务等待人类交互: {interaction_type}，请处理请求后任务将自动继续"
+            return "任务等待人类交互，请处理请求后任务将自动继续"
         elif self.status == TaskStatus.COMPLETED:
             return "任务已完成，可查看执行结果和报告"
         elif self.status == TaskStatus.FAILED:

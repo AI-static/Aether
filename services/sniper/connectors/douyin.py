@@ -53,9 +53,11 @@ class VideoDetail(BaseModel):
 class DouyinConnector(BaseConnector):
     """抖音连接器 - 使用 AgentBay session + browser + agent"""
 
+    # 类变量，所有实例共享
+    _login_tasks = {}
+
     def __init__(self, playwright):
         super().__init__(platform_name=PlatformType.DOUYIN, playwright=playwright)
-        self._login_tasks = {}
 
     async def search_and_extract(
         self,
@@ -477,7 +479,7 @@ class DouyinConnector(BaseConnector):
         if not context_result.success:
             raise ValueError(f"Failed to create context: {context_result.error_message}")
 
-        # 创建 session
+        # 创建 session（auto_upload=False，手动控制落盘时机）
         session_result = await self.agent_bay.create(
             CreateSessionParams(
                 image_id="browser_latest",
@@ -510,19 +512,29 @@ class DouyinConnector(BaseConnector):
             # 导航到抖音登录页
             await session.browser.agent.navigate("https://www.douyin.com")
             await asyncio.sleep(1.5)
+
+            # 检查是否已登录
             extract_options = ExtractOptions(
-                instruction="""查看此页面，看是否有用户头像等信息，判断其状态是否为登陆。""",
+                instruction="""查看此页面，判断用户是否已经登录抖音。
+如果页面顶部有用户头像、昵称等个人信息，则 has_login 为 true，否则为 false。
+重要：只返回 JSON 格式，不要返回其他文字说明。""",
                 use_vision=True,
                 schema=CheckLoginStatus
             )
 
-            success, data = await session.browser.agent.extract(extract_options)
-            if success and data.has_login:
-                return {
-                    "success": True,
-                    "context_id": context_key,
-                    "message": "Has Logining"
+            try:
+                success, data = await session.browser.agent.extract(extract_options)
+                if success and data.has_login:
+                    return {
+                        "success": True,
+                        "context_id": context_key,
+                        "message": "Has Logining",
+                        "is_logged_in": True
                     }
+            except Exception as e:
+                logger.warning(f"[douyin] Failed to check login status: {e}, will continue to show QR code")
+                # 检查失败时，继续显示二维码（假设未登录）
+                # 不立即返回，继续执行后面的二维码显示逻辑
 
             # 使用 Agent 找到并点击登录方式，显示二维码
             login_act = ActOptions(
@@ -545,27 +557,20 @@ class DouyinConnector(BaseConnector):
 
             logger.info(f"[douyin] QRCode generated, waiting for scan...")
 
-            # 启动后台任务：等待扫码后优雅关闭
-            task = asyncio.create_task(self._wait_and_cleanup_after_scan(
-                session=session,
-                browser=None,
-                context_key=context_key,
-                timeout=timeout
-            ))
-
-            # 存储登录任务信息（包含 session 和 browser）
-            self._login_tasks[context_key] = {
-                "session": session,
-                "browser": None,
-                "task": task,
-                "context_key": context_key,
-                "timeout": timeout
-            }
+            # 🔥 关键：启动后台任务，监听登录确认 + 自动落盘
+            asyncio.create_task(
+                self._monitor_and_cleanup(
+                    session=session,
+                    context_id=context_key,
+                    timeout=timeout
+                )
+            )
 
             return {
                 "success": True,
                 "context_id": context_key,
-                "qrcode": qrcode_url,
+                "browser_url": qrcode_url,  # 云浏览器 URL
+                "qrcode": qrcode_url,  # 兼容旧字段
                 "timeout": timeout,
                 "message": "Cloud browser created, waiting for login",
                 "is_logged_in": False
@@ -573,37 +578,8 @@ class DouyinConnector(BaseConnector):
 
         except Exception as e:
             logger.debug(f"[douyin] Check existing context failed: {e}")
-            await self.cleanup_resources(verify_session, browser_v)
-            await self.agent_bay.delete(verify_session, sync_context=False)
-
-    async def _wait_and_cleanup_after_scan(
-            self,
-            session: Any,
-            browser: Any,
-            context_key: str,
-            timeout: int = 120,
-    ):
-        """后台任务：等待指定秒数后优雅关闭并落盘上下文"""
-        logger.info(f"[douyin] Background task: waiting {timeout}s before cleanup")
-
-        try:
-            # 直接等待指定秒数，让用户扫码并让页面完全稳定
-            await asyncio.sleep(timeout)
-
-            logger.info(f"[douyin] Saving context and cleaning up: {context_key}")
-
-            # 优雅关闭浏览器，自动同步 cookies 到 context
-            await self.cleanup_resources(session, browser)
-            logger.info(f"[douyin] Context saved successfully")
-
-        except Exception as e:
-            logger.error(f"[douyin] Background task error: {e}")
-            await self.cleanup_resources(session, browser)
-        finally:
-            # 清理 _login_tasks 中的记录
-            if context_key in self._login_tasks:
-                logger.info(f"[douyin] Cleaning up _login_tasks entry: {context_key}")
-                del self._login_tasks[context_key]
+            await self.cleanup_resources(session, None)
+            await self.agent_bay.delete(session, sync_context=False)
 
     def _parse_search_users(self, soup: BeautifulSoup, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """从搜索页面解析用户数据（使用 BeautifulSoup）
@@ -1012,6 +988,8 @@ class DouyinConnector(BaseConnector):
 
             # 递归查找视频数据
             video_info = self._find_video_in_data(data)
+
+            logger.info(f"video_info {video_info}")
 
             if not video_info:
                 logger.warning("[douyin] Video info not found in JavaScript data")

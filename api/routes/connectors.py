@@ -215,7 +215,6 @@ async def publish_content(request: Request):
             data={"error": str(e)}
         ).model_dump(), status=500)
 
-
 @connectors_bp.post("/login")
 async def login(request: Request):
     """登录平台"""
@@ -292,113 +291,6 @@ async def login(request: Request):
         return json(BaseResponse(
             code=ErrorCode.INTERNAL_ERROR,
             message=ErrorMessage.INTERNAL_ERROR,
-            data={"error": str(e)}
-        ).model_dump(), status=500)
-
-
-@connectors_bp.post("/login/<platform:str>/confirm")
-async def confirm_login(request: Request, platform: str):
-    """用户确认已完成登录 - 立即保存登录状态
-
-    用户在云浏览器中完成登录后，点击"我已完成登录"按钮调用此接口：
-    1. 从 connector._login_tasks 获取 session 和 browser
-    2. 调用 _cleanup_resources 清理资源并持久化 cookies
-    3. 清理 _login_tasks 记录
-
-    优势：无需等待120秒，立即保存登录状态
-    """
-    try:
-        data = request.json or {}
-        context_id = data.get("context_id")
-
-        if not context_id:
-            return json(BaseResponse(
-                code=ErrorCode.BAD_REQUEST,
-                message="context_id is required",
-                data=None
-            ).model_dump(), status=400)
-
-        auth_info = request.ctx.auth_info
-
-        # 获取 connector
-        from models.connectors import PlatformType
-        from services.sniper.connectors.xiaohongshu import XiaohongshuConnector
-        from services.sniper.connectors.douyin import DouyinConnector
-
-        try:
-            platform_type = PlatformType(platform)
-        except ValueError:
-            return json(BaseResponse(
-                code=ErrorCode.BAD_REQUEST,
-                message=f"Unsupported platform: {platform}",
-                data=None
-            ).model_dump(), status=400)
-
-        # 创建 connector 实例
-        if platform_type == PlatformType.XIAOHONGSHU:
-            connector = XiaohongshuConnector(playwright=request.app.ctx.playwright)
-        elif platform_type == PlatformType.DOUYIN:
-            connector = DouyinConnector(playwright=request.app.ctx.playwright)
-        else:
-            return json(BaseResponse(
-                code=ErrorCode.BAD_REQUEST,
-                message=f"Platform {platform} not supported yet",
-                data=None
-            ).model_dump(), status=400)
-
-        # 从 _login_tasks 获取 session 和 browser
-        if context_id not in connector._login_tasks:
-            return json(BaseResponse(
-                code=ErrorCode.NOT_FOUND,
-                message=f"Login task not found for context: {context_id}",
-                data=None
-            ).model_dump(), status=404)
-
-        login_task = connector._login_tasks[context_id]
-        session = login_task.get("session")
-        browser = login_task.get("browser")
-
-        if not session:
-            return json(BaseResponse(
-                code=ErrorCode.INTERNAL_ERROR,
-                message="Session not found in login task",
-                data=None
-            ).model_dump(), status=500)
-
-        # 立即清理资源并保存 context（无需等待120秒）
-        logger.info(f"[Auth] User confirmed login for {platform}, immediately saving context: {context_id}")
-
-        try:
-            # 调用 _cleanup_resources 会自动:
-            # 1. 优雅关闭浏览器
-            # 2. 同步 cookies 到 context (sync_context=True)
-            await connector._cleanup_resources(session, browser)
-
-            logger.info(f"[Auth] Context saved and resources cleaned successfully: {context_id}")
-
-        except Exception as e:
-            logger.error(f"[Auth] Error saving context: {e}")
-            # 即使出错也继续，因为 context 可能已经保存
-
-        # 清理 _login_tasks
-        del connector._login_tasks[context_id]
-
-        return json(BaseResponse(
-            code=ErrorCode.SUCCESS,
-            message="登录状态已保存",
-            data={
-                "context_id": context_id,
-                "platform": platform,
-                "source": auth_info.source.value,
-                "source_id": auth_info.source_id
-            }
-        ).model_dump())
-
-    except Exception as e:
-        logger.error(f"确认登录失败: {e}")
-        return json(BaseResponse(
-            code=ErrorCode.INTERNAL_ERROR,
-            message=str(e),
             data={"error": str(e)}
         ).model_dump(), status=500)
 

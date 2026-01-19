@@ -80,9 +80,14 @@ class CreatorSniper(BaseAgent):
             )
             logger.info(f"login_res --> {login_res}")
             if not login_res.get("is_logged_in"):
-                # 未登录，暂停任务并保存登录信息
-                await self._task.waiting_login(login_res)
-                logger.info(f"[xhs_creator] 任务 {self._task.id} 等待登录")
+                # 未登录，暂停任务并等待用户交互
+                login_res["platform"] = "xiaohongshu"
+                await self._task.wait_for_human_input(
+                    interaction_type="login_confirm",
+                    data=login_res,
+                    resume_point="after_login"
+                )
+                logger.info(f"[xhs_creator] 任务 {self._task.id} 等待登录确认")
                 return "等待登录"
 
             # 使用 async with ConnectorService
